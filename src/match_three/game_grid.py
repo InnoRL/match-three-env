@@ -36,7 +36,7 @@ class MatchResults:
     Match Result is a 3D matrix where:
 
     - Dimension 0: Depth (number of match cascades)
-    - Dimension 1: Number of matches at that depth
+    - Dimension 1: Type of matches at that depth (matching 3 in a row, 4, cross etc)
     - Dimension 2: Symbol type (e.g., which game pieces matched)
 
     The data type is `int`, compatible with JAX.
@@ -45,6 +45,7 @@ class MatchResults:
     matches: chex.Array  # Shape: (depth, num_matches_per_depth, symbol_type)
 
     def initialize(grid_shape: Tuple, num_symbols: int) -> "MatchResults":
+        # TODO: calculate max max_possible_matches properly
         max_possible_matches = jnp.prod(grid_shape)
         return MatchResults(
             matches=jnp.zeros(
