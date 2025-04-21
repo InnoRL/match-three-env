@@ -1,7 +1,4 @@
-"""JAX compatible version of the bandit environment from bsuite."""
-
 from typing import Any, Dict, Optional, Tuple, Union
-
 
 import chex
 from flax import struct
@@ -11,40 +8,72 @@ import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
 
-from game_grid import MatchThreeGameGridStruct
+from match_three.game_grid import MatchThreeGameGridFunctions, MatchThreeGameGridStruct
+
+
+class GridSpace(spaces.Space):
+    def __init__(
+        self, grid_size: Tuple[int, int], grid_mask: chex.Array, n_colors: int
+    ):
+        assert 4 <= n_colors <= 7
+        self.grid_size = grid_size
+        self.grid_mask = grid_mask
+        self.n_colors = n_colors
+
+    def sample(self, key: chex.PRNGKey) -> chex.Array:
+        grid = jax.random.randint(
+            key, self.grid_size, minval=1, maxval=self.n_colors + 1
+        )
+        grid = grid * self.grid_mask + jnp.full_like(grid) * jnp.logical_not(
+            self.grid_mask
+        )
+        return grid
+
+    def contains(self, grid: chex.Array) -> Any:
+        grid_vals = grid * self.grid_mask
+        grid_hols = grid * jnp.logical_not(self.grid_mask)
+
+        # All cells with values must contain valid values representing colors.
+        vals_correct = jnp.sum(0 < grid_vals <= self.n_colors) == jnp.sum(
+            self.grid_mask
+        )
+
+        # All cells with holes must contain -1s.
+        hols_correct = jnp.sum(grid_hols == -1) == (
+            self.grid_size[0] * self.grid_size[1] - jnp.sum(self.grid_mask)
+        )
+        return jnp.logical_and(vals_correct, hols_correct)
+
 
 @struct.dataclass
 class EnvState(environment.EnvState):
-    rewards: Union[chex.Array, float]
-    game_grid: MatchThreeGameGridStruct
-    time: Union[float, chex.Array]
+    grid: MatchThreeGameGridStruct
+    step: Union[int, chex.Array]
 
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
     grid_size: Tuple[int, int] = (9, 9)
-    number_of_colors: int = 4
-    max_steps_in_episode: int = 100
+    grid_mask: chex.Array
+    n_colors: int = 4
+    max_steps: int = 100
 
-def calc_number_of_actions(env_params:EnvParams):
-    g_h = env_params.grid_height
-    g_w = env_params.grid_width
-    
-    # TODO: implement a proper function to calculate the number of actions
-    return g_h * g_w
+
+def get_action_space(params: EnvParams):
+    grid_h = params.grid_size[0]
+    grid_w = params.grid_size[1]
+    return 2 * grid_h * grid_w - grid_h - grid_w
+
 
 class MatchThree(environment.Environment[EnvState, EnvParams]):
-    """
-    JAX enviromnent for match three game.
-    """
+    """JAX enviromnent for match three game."""
 
-    def __init__(self):
+    def __init__(self, params: EnvParams):
         super().__init__()
-        self.n_actions = calc_number_of_actions(self.default_params())
+        self.n_actions = get_action_space(params)
 
     @property
     def default_params(self) -> EnvParams:
-        # Default environment parameters
         return EnvParams()
 
     def step_env(
@@ -54,53 +83,43 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         action: Union[int, float, chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        """Perform single timestep state transition."""
-        reward = state.rewards[action]
-        state = EnvState(
-            state.rewards,
-            state.total_regret + params.optimal_return - reward,
-            state.time + 1,
-        )
+        grid, matches = MatchThreeGameGridFunctions.apply_swap(key, state.grid, ...)
 
-        # Check game condition & no. steps for termination condition
+        reward = ...
+
+        state = EnvState(grid, state.step + 1)
         done = self.is_terminal(state, params)
-        info = {"discount": self.discount(state, params)}
+        # info = {"discount": self.discount(state, params)}
         return (
             lax.stop_gradient(self.get_obs(state)),
             lax.stop_gradient(state),
             reward,
             done,
-            info,
+            # info,
         )
 
     def reset_env(
         self, key: chex.PRNGKey, params: EnvParams
-    ) -> Tuple[chex.Array, Any]:  # dict]:
-        """Reset environment state by sampling initial position."""
-        action_mask = jax.random.choice(
-            key,
-            jnp.arange(self.num_actions),
-            shape=(self.num_actions,),
-            replace=False,
+    ) -> Tuple[chex.Array, EnvState]:
+        """Reset environment state by generating new grid."""
+        grid = MatchThreeGameGridFunctions.generate_game_grid(
+            key, params.grid_size, params.grid_mask, params.n_colors
         )
-        rewards = jnp.linspace(0, 1, self.num_actions)[action_mask]
-
-        state = EnvState(rewards, 0.0, 0)
+        state = EnvState(grid, 0)
         return self.get_obs(state), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
-        """Return observation from raw state trafo."""
-        return jnp.ones(shape=(1, 1), dtype=jnp.float32)
+        """Return observation from raw state."""
+        return state.grid
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""
-        # Episode always terminates after single step - Do not reset though!
-        return jnp.array(True)
+        return jnp.array(params.max_steps < state.step)
 
     @property
     def name(self) -> str:
         """Environment name."""
-        return "SimpleBandit-bsuite"
+        return "Match-3"
 
     @property
     def num_actions(self) -> int:
@@ -109,18 +128,17 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
 
     def action_space(self, params: Optional[EnvParams] = None) -> spaces.Discrete:
         """Action space of the environment."""
-        return spaces.Discrete(self.num_actions)
+        return spaces.Discrete(self.n_actions)
 
-    def observation_space(self, params: EnvParams) -> spaces.Box:
+    def observation_space(self, params: EnvParams) -> GridSpace:
         """Observation space of the environment."""
-        return spaces.Box(1, 1, (1, 1))
+        return (GridSpace(params.grid_size, params.grid_mask, params.n_colors),)
 
     def state_space(self, params: EnvParams) -> spaces.Dict:
         """State space of the environment."""
         return spaces.Dict(
             {
-                "rewards": spaces.Box(0, 1, (self.num_actions,)),
-                "total_regret": spaces.Box(0, params.max_steps_in_episode, ()),
-                "time": spaces.Discrete(params.max_steps_in_episode),
+                "grid": GridSpace(params.grid_size, params.grid_mask, params.n_colors),
+                "step": spaces.Discrete(params.max_steps),
             }
         )
