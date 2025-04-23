@@ -14,6 +14,7 @@ from match_three.game_grid import (
     MatchThreeGameGridStruct,
 )
 
+REWARD_MULTIPLIER = 1
 
 class GridSpace(spaces.Space):
     def __init__(
@@ -88,11 +89,17 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         action: Union[int, float, chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        grid, matches = MatchThreeGameGridFunctions.apply_swap(key=key, state=state.grid, params=params.grid_params, grid_cell=action[:2], direction=action[2])
+        grid, matches = MatchThreeGameGridFunctions.apply_swap(
+            key=key,
+            state=state.grid,
+            params=params.grid_params,
+            grid_cell=action[:2],
+            direction=action[2],
+        )
 
-        reward = jnp.sum(matches)
+        reward = self._compute_reward(matches.matches)
 
-        state = EnvState(grid, state.time + 1)
+        state = EnvState(grid=grid, time=state.time + 1)
         done = self.is_terminal(state, params)
         # info = {"discount": self.discount(state, params)}
         return (
@@ -147,3 +154,11 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
                 "time": spaces.Discrete(params.max_steps_in_episode),
             }
         )
+        
+    @staticmethod
+    def _compute_reward(matches: chex.Array) -> chex.Array:
+        """Compute reward = sum(matches[i] * c * ln(i + 1)) for each i."""
+        indices = jnp.arange(len(matches)) + 1  # 1-based indexing (avoid ln(0))
+        log_weights = jnp.log2(indices)  # log2 or ln
+        weighted_matches = matches * REWARD_MULTIPLIER * log_weights
+        return jnp.sum(weighted_matches)
