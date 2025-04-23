@@ -66,8 +66,8 @@ class MatchThreeGameGridStruct:
 
 @struct.dataclass
 class MatchThreeGameGridParams:
-    num_symbols: int
-    mask: chex.Array
+    num_symbols: int = 4
+    mask: chex.Array = jnp.zeros((GRID_SIZE, GRID_SIZE))
 
 
 class MatchThreeGameGridFunctions:
@@ -134,8 +134,8 @@ class MatchThreeGameGridFunctions:
         key, state, match_results = jax.lax.cond(
             move_is_legal,
             lambda x: self.__process_physics(*x),
-            lambda x: x,
-            (key, state, match_results),
+            lambda x: (x[0], x[1], x[3]),
+            (key, state, params, match_results),
         )
 
         return key, state, match_results

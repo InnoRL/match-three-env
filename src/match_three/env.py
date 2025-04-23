@@ -8,7 +8,11 @@ import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
 
-from match_three.game_grid import MatchThreeGameGridFunctions, MatchThreeGameGridStruct
+from match_three.game_grid import (
+    MatchThreeGameGridFunctions,
+    MatchThreeGameGridParams,
+    MatchThreeGameGridStruct,
+)
 
 
 class GridSpace(spaces.Space):
@@ -53,9 +57,8 @@ class EnvState(environment.EnvState):
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
+    grid_params: MatchThreeGameGridParams
     grid_size: Tuple[int, int] = (9, 9)
-    grid_mask: chex.Array
-    n_colors: int = 4
     max_steps: int = 100
 
 
@@ -102,11 +105,11 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         self, key: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """Reset environment state by generating new grid."""
-        grid = MatchThreeGameGridFunctions.generate_game_grid(
-            key, params.grid_size, params.grid_mask, params.n_colors
+        key, grid = MatchThreeGameGridFunctions.generate_game_grid(
+            key, params.grid_params
         )
-        state = EnvState(grid, 0)
-        return self.get_obs(state), state
+        state = EnvState(grid=grid, step=0)
+        return self.get_obs(state, params, key), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
         """Return observation from raw state."""
