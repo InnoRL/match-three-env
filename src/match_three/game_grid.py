@@ -4,22 +4,23 @@ from flax import struct
 import jax
 from jax import numpy as jnp
 
-SWAP_DIRECTIONS = {
-    0: (-1, 0),  # Swap with left neighbor
-    1: (0, -1),  # Swap with top neighbor
-    2: (1, 0),  # Swap with right neighbor
-    3: (0, 1),  # Swap with bottom neighbor
+SWAP_DIRECTIONS = (
+    (-1, 0),  # Swap with left neighbor
+    (0, -1),  # Swap with top neighbor
+    (1, 0),  # Swap with right neighbor
+    (0, 1),  # Swap with bottom neighbor
     # Note: for that the coordinates are (y, x)
     # y is the vertical axis and x is the horizontal
     # The environment will use only directions 0 and 1
-}
+)
 
-ROLL_DIRECTIONS = [
+
+ROLL_DIRECTIONS = (
     (-1, 0),  # roll up
     (1, 0),  # roll down
     (-1, 1),  # roll left
     (1, 1),  # roll right
-]
+)
 
 CASCADE_MAX_DEPTH = 10
 GRID_SIZE = 9
@@ -48,6 +49,7 @@ class MatchResults:
 
     matches: chex.Array  # Shape: (depth)
 
+    @staticmethod
     def initialize() -> "MatchResults":
         # TODO: calculate max max_possible_matches properly
         return MatchResults(
@@ -61,7 +63,7 @@ class MatchResults:
 # TODO: this can be removed. Separate mask and num_symbols into env parameters
 @struct.dataclass
 class MatchThreeGameGridStruct:
-    grid: chex.Array
+    grid: chex.Array = jnp.zeros((GRID_SIZE, GRID_SIZE))
 
 
 @struct.dataclass
@@ -74,8 +76,9 @@ class MatchThreeGameGridFunctions:
     """A stateless functional class for Match-Three game grid operations."""
 
     # method to initialize a struct based on input
+    @staticmethod
     def generate_game_grid(
-        self, key: chex.PRNGKey, params: MatchThreeGameGridParams
+        key: chex.PRNGKey, params: MatchThreeGameGridParams
     ) -> Tuple[chex.PRNGKey, MatchThreeGameGridStruct]:
         def cond_fn(carry):
             (
@@ -89,21 +92,21 @@ class MatchThreeGameGridFunctions:
         def body_fn(carry):
             key, grid, matches, i = carry
             key, subkey = jax.random.split(key)
-            key, random_grid = self.__generate_random_grid(subkey, params)
+            key, random_grid = MatchThreeGameGridFunctions.__generate_random_grid(subkey, params)
             grid = jnp.where(matches, random_grid, grid)
-            new_matches = self.__find_matches(grid)
-            return key, grid, new_matches, i + 1
+            new_matches = MatchThreeGameGridFunctions.__find_matches(grid)
+            return (key, grid, new_matches, i + 1)
 
-        key, initial_grid = self.__generate_random_grid(key, params)
-        matches = self.__find_matches(initial_grid)
+        key, initial_grid = MatchThreeGameGridFunctions.__generate_random_grid(key, params)
+        matches = MatchThreeGameGridFunctions.__find_matches(initial_grid)
         key, final_grid, _, _ = jax.lax.while_loop(
             cond_fn, body_fn, (key, initial_grid, matches, 0)
         )
         return key, MatchThreeGameGridStruct(grid=final_grid)
 
     # method to swap based on (y,x) and swap direction -> new game board (can be the same if the swap was illeral)
+    @staticmethod
     def apply_swap(
-        self,
         key: chex.PRNGKey,
         state: MatchThreeGameGridStruct,
         params: MatchThreeGameGridParams,
@@ -126,14 +129,14 @@ class MatchThreeGameGridFunctions:
         # if true then apply swap and process physics and return MatchResults (this will take exactly CASCADE_MAX_DEPTH steps)
         # def _true_f_move_is_legal(operand):
         #     key, state, match_results = operand
-        #     return self.__process_physics(
+        #     return MatchThreeGameGridFunctions.__process_physics(
         #         key=key, state=state, match_results=match_results
         #     )
 
         match_results = MatchResults.initialize()
         key, state, match_results = jax.lax.cond(
             move_is_legal,
-            lambda x: self.__process_physics(*x),
+            lambda x: MatchThreeGameGridFunctions.__process_physics(*x),
             lambda x: (x[0], x[1], x[3]),
             (key, state, params, match_results),
         )
@@ -141,8 +144,8 @@ class MatchThreeGameGridFunctions:
         return key, state, match_results
 
     # step ticker to update "physics" when a move is doing
+    @staticmethod
     def __process_physics(
-        self,
         key: chex.PRNGKey,
         state: MatchThreeGameGridStruct,
         params: MatchThreeGameGridParams,
@@ -150,25 +153,25 @@ class MatchThreeGameGridFunctions:
     ) -> Tuple[chex.PRNGKey, MatchThreeGameGridStruct, MatchResults]:
 
         def cond_fn(carry):
-            _, _, match_results, i = carry
-            return jnp.logical_and(match_results[i - 1] > 0, i < CASCADE_MAX_DEPTH)
+            _, _, _, match_results, i = carry
+            return jnp.logical_and(match_results.matches[i - 1] > 0, i < CASCADE_MAX_DEPTH)
 
         def body_fn(carry):
             key, prev_matches, state, match_results, i = carry
 
             # remove matches
-            grid = self.__remove_matches(state.grid, prev_matches)
+            grid = MatchThreeGameGridFunctions.__remove_matches(state.grid, prev_matches)
             # collapse grid
-            grid = self.__collapse_grid(grid)
+            grid = MatchThreeGameGridFunctions.__collapse_grid(grid)
             # refill grid
-            key, grid = self.__refill_grid(key, grid, params)
+            key, grid = MatchThreeGameGridFunctions.__refill_grid(key, grid, params)
             # generate new grid if there are no valid moves
-            key, grid = self.__generate_new_grid_if_no_moves(key, grid, params)
+            key, grid = MatchThreeGameGridFunctions.__generate_new_grid_if_no_moves(key, grid, params)
 
             # new matches
-            new_matches = self.__find_matches(grid)
+            new_matches = MatchThreeGameGridFunctions.__find_matches(grid)
             num_matches = jnp.sum(new_matches)
-            match_results = match_results.at[i].set(num_matches)
+            match_results = match_results.matches.at[i].set(num_matches)
             return (
                 key,
                 new_matches,
@@ -177,15 +180,16 @@ class MatchThreeGameGridFunctions:
                 i + 1,
             )
 
-        init_matches = self.__find_matches(state.grid)
+        init_matches = MatchThreeGameGridFunctions.__find_matches(state.grid)
         key, _, _, match_results, _ = jax.lax.while_loop(
             cond_fn, body_fn, (key, init_matches, state, match_results, 0)
         )
 
         return key, state, match_results
 
+    @staticmethod
     def __generate_random_grid(
-        self, key: chex.PRNGKey, params: MatchThreeGameGridParams
+        key: chex.PRNGKey, params: MatchThreeGameGridParams
     ) -> Tuple[chex.PRNGKey, chex.Array]:
         key, subkey = jax.random.split(key)
         grid = jax.random.randint(
@@ -194,7 +198,8 @@ class MatchThreeGameGridFunctions:
         grid = jnp.where(params.mask == 0, grid, -1)
         return key, grid
 
-    def __translate_grid(self, grid, direction) -> chex.Array:
+    @staticmethod
+    def __translate_grid(grid, direction) -> chex.Array:
         def mask_vertical_fn(carry):
             grid, p = carry
             return grid.at[p, :].set(-1)
@@ -214,11 +219,12 @@ class MatchThreeGameGridFunctions:
         )
         return grid
 
-    def __find_matches(self, grid: chex.Array) -> chex.Array:
-        grid_roll_up = self.__translate_grid(grid, ROLL_DIRECTIONS[0])
-        grid_roll_down = self.__translate_grid(grid, ROLL_DIRECTIONS[1])
-        grid_roll_left = self.__translate_grid(grid, ROLL_DIRECTIONS[2])
-        grid_roll_right = self.__translate_grid(grid, ROLL_DIRECTIONS[3])
+    @staticmethod
+    def __find_matches(grid: chex.Array) -> chex.Array:
+        grid_roll_up = MatchThreeGameGridFunctions.__translate_grid(grid, ROLL_DIRECTIONS[0])
+        grid_roll_down = MatchThreeGameGridFunctions.__translate_grid(grid, ROLL_DIRECTIONS[1])
+        grid_roll_left = MatchThreeGameGridFunctions.__translate_grid(grid, ROLL_DIRECTIONS[2])
+        grid_roll_right = MatchThreeGameGridFunctions.__translate_grid(grid, ROLL_DIRECTIONS[3])
 
         vertical_matches = jnp.equal(grid, grid_roll_up) & jnp.equal(
             grid, grid_roll_down
@@ -247,10 +253,12 @@ class MatchThreeGameGridFunctions:
 
         return all_matches
 
-    def __remove_matches(self, grid: chex.Array, matches: chex.Array) -> chex.Array:
+    @staticmethod
+    def __remove_matches(grid: chex.Array, matches: chex.Array) -> chex.Array:
         return jnp.where(matches, 0, grid)
 
-    def __collapse_grid(self, grid: chex.Array) -> chex.Array:
+    @staticmethod
+    def __collapse_grid(grid: chex.Array) -> chex.Array:
         def process_column(col_v: chex.Array) -> chex.Array:
             col_i = jnp.arange(0, 9)
             col_w = jnp.astype(col_v == -1, jnp.int4) - jnp.astype(col_v == 0, jnp.int4)
@@ -273,18 +281,20 @@ class MatchThreeGameGridFunctions:
         processed_cols = jax.vmap(process_column)(grid.T)
         return processed_cols.T
 
+    @staticmethod
     def __refill_grid(
-        self,
         key: chex.PRNGKey,
-        state: MatchThreeGameGridStruct,
+        grid: chex.Array,
         params: MatchThreeGameGridParams,
     ) -> Tuple[chex.PRNGKey, chex.Array]:
         key, subkey = jax.random.split(key)
-        random_grid = self.__generate_random_grid(subkey, params)
-        return key, jnp.where(state.grid == 0, random_grid, state.grid)
+        key, random_grid = MatchThreeGameGridFunctions.__generate_random_grid(subkey, params)
+        print(grid)
+        return key, jnp.where(grid == 0, random_grid, grid)
 
+    @staticmethod
     def __check_no_valid_moves(
-        self, state: MatchThreeGameGridStruct, params: MatchThreeGameGridParams
+        grid: chex.Array, params: MatchThreeGameGridParams
     ) -> bool:
         def __translate_row(grid, row_idx, direction) -> chex.Array:
             row_v = grid.at[row_idx, :].get()
@@ -325,21 +335,21 @@ class MatchThreeGameGridFunctions:
 
             return grid_new_down, grid_new_up, grid_new_right, grid_new_left
 
-        grids = jnp.concatenate(__get_translated_grids_tuple(state.grid), axis=0)
+        grids = jnp.concatenate(__get_translated_grids_tuple(grid), axis=0)
         grids = jax.vmap(__reapply_mask, in_axes=(0, None))(grids, params.mask)
-        matches = jax.vmap(self.__find_matches)(grids)
+        matches = jax.vmap(MatchThreeGameGridFunctions.__find_matches)(grids)
         return jnp.all(jnp.sum(matches, axis=(1, 2)) == 0)
 
+    @staticmethod
     def __generate_new_grid_if_no_moves(
-        self,
         key: chex.PRNGKey,
-        state: MatchThreeGameGridStruct,
+        grid: chex.Array,
         params: MatchThreeGameGridParams,
-    ) -> Tuple[chex.PRNGKey, MatchThreeGameGridStruct]:
+    ) -> Tuple[chex.PRNGKey, chex.Array]:
         key, subkey = jax.random.split(key)
         grid = jax.lax.cond(
-            self.__check_no_valid_moves(state, params),
-            lambda: self.generate_game_grid(subkey, params)[1].grid,
-            lambda: state.grid,
+            MatchThreeGameGridFunctions.__check_no_valid_moves(grid, params),
+            lambda: MatchThreeGameGridFunctions.generate_game_grid(subkey, params)[1].grid,
+            lambda: grid,
         )
-        return key, MatchThreeGameGridStruct(grid=grid)
+        return key, grid

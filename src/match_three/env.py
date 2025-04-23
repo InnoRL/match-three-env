@@ -51,15 +51,15 @@ class GridSpace(spaces.Space):
 
 @struct.dataclass
 class EnvState(environment.EnvState):
-    grid: MatchThreeGameGridStruct
-    step: Union[int, chex.Array]
+    grid: MatchThreeGameGridStruct = MatchThreeGameGridStruct()
+    time: int = 0
 
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
-    grid_params: MatchThreeGameGridParams
+    grid_params: MatchThreeGameGridParams = MatchThreeGameGridParams()
     grid_size: Tuple[int, int] = (9, 9)
-    max_steps: int = 100
+    max_steps_in_episode: int = 100
 
 
 def get_action_space(params: EnvParams):
@@ -71,8 +71,10 @@ def get_action_space(params: EnvParams):
 class MatchThree(environment.Environment[EnvState, EnvParams]):
     """JAX enviromnent for match three game."""
 
-    def __init__(self, params: EnvParams):
+    def __init__(self, params: EnvParams = None):
         super().__init__()
+        if params is None:
+            params = EnvParams()
         self.n_actions = get_action_space(params)
 
     @property
@@ -86,11 +88,11 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         action: Union[int, float, chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
-        grid, matches = MatchThreeGameGridFunctions.apply_swap(key, state.grid, ...)
+        grid, matches = MatchThreeGameGridFunctions.apply_swap(key=key, state=state.grid, params=params.grid_params, grid_cell=action[:2], direction=action[2])
 
-        reward = ...
+        reward = jnp.sum(matches)
 
-        state = EnvState(grid, state.step + 1)
+        state = EnvState(grid, state.time + 1)
         done = self.is_terminal(state, params)
         # info = {"discount": self.discount(state, params)}
         return (
@@ -108,7 +110,7 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         key, grid = MatchThreeGameGridFunctions.generate_game_grid(
             key, params.grid_params
         )
-        state = EnvState(grid=grid, step=0)
+        state = EnvState(grid=grid, time=0)
         return self.get_obs(state, params, key), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
@@ -117,7 +119,7 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""
-        return jnp.array(params.max_steps < state.step)
+        return jnp.array(params.max_steps_in_episode < state.time)
 
     @property
     def name(self) -> str:
@@ -142,6 +144,6 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         return spaces.Dict(
             {
                 "grid": GridSpace(params.grid_size, params.grid_mask, params.n_colors),
-                "step": spaces.Discrete(params.max_steps),
+                "time": spaces.Discrete(params.max_steps_in_episode),
             }
         )
