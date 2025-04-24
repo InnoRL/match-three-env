@@ -1,8 +1,9 @@
-from typing import Optional, Tuple, Union
+from typing import Tuple
+
 import chex
-from flax import struct
 import jax
-from jax import numpy as jnp
+import jax.numpy as jnp
+from flax import struct
 
 
 def get_swap_direction(direction: int) -> Tuple[int, int]:
@@ -232,7 +233,6 @@ class MatchThreeGameGridFunctions:
 
     @staticmethod
     def __translate_grid_vertical(grid, direction) -> chex.Array:
-
         translated_grid = jnp.roll(grid, direction, axis=0)
 
         p = jax.lax.cond(direction == 1, lambda: 0, lambda: -1)
@@ -242,7 +242,6 @@ class MatchThreeGameGridFunctions:
 
     @staticmethod
     def __translate_grid_horizontal(grid, direction) -> chex.Array:
-
         translated_grid = jnp.roll(grid, direction, axis=1)
 
         p = jax.lax.cond(direction == 1, lambda: 0, lambda: -1)

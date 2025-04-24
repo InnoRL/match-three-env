@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
 import optax
-from src.match_three.game_grid import K_MAX
-
 from jax.nn.initializers import variance_scaling
+
+from match_three_env.game_grid import K_MAX
+
 
 @jax.jit
 def encode_grid(grid):
@@ -17,13 +18,15 @@ def encode_grid(grid):
 # ----------------------
 # Custom Initializers
 # ----------------------
-def rl_init(scale: float = 2.0, mode: str = 'fan_in'):
+def rl_init(scale: float = 2.0, mode: str = "fan_in"):
     """Kaiming/He initialization optimized for ReLU networks in RL"""
-    return variance_scaling(scale, mode, 'truncated_normal', dtype=jnp.float32)
+    return variance_scaling(scale, mode, "truncated_normal", dtype=jnp.float32)
+
 
 def small_init(scale: float = 0.01):
     """Small initialization for value/policy heads"""
-    return variance_scaling(scale, 'fan_in', 'truncated_normal', dtype=jnp.float32)
+    return variance_scaling(scale, "fan_in", "truncated_normal", dtype=jnp.float32)
+
 
 # ----------------------
 def cosine_annealing_with_warmup(warmup_steps, total_steps, base_lr=0.1):
@@ -40,8 +43,12 @@ def cosine_annealing_with_warmup(warmup_steps, total_steps, base_lr=0.1):
     """
     return optax.join_schedules(
         schedules=[
-            optax.linear_schedule(init_value=0.0, end_value=base_lr, transition_steps=warmup_steps),  # Warmup
-            optax.cosine_decay_schedule(init_value=base_lr, decay_steps=total_steps - warmup_steps)  # Cosine Annealing
+            optax.linear_schedule(
+                init_value=0.0, end_value=base_lr, transition_steps=warmup_steps
+            ),  # Warmup
+            optax.cosine_decay_schedule(
+                init_value=base_lr, decay_steps=total_steps - warmup_steps
+            ),  # Cosine Annealing
         ],
-        boundaries=[warmup_steps]  # Switch from warmup to cosine decay
+        boundaries=[warmup_steps],  # Switch from warmup to cosine decay
     )

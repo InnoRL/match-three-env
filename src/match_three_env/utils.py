@@ -1,8 +1,8 @@
-from functools import partial
+from typing import Tuple
+
+import chex
 import jax
 import jax.numpy as jnp
-import chex
-from typing import Tuple
 
 
 def conv_action_to_swap(
@@ -17,6 +17,7 @@ def conv_action_to_swap(
 
     action -= rswap_num
     return jnp.array([action % (grid_size[0] - 1), action // (grid_size[0] - 1)]), 3
+
 
 # @partial(jax.jit, static_argnums=(0,))
 def conv_action_to_swap_jit(

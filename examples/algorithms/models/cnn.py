@@ -1,6 +1,7 @@
 from typing import Callable
-from flax import linen as nn
+
 import jax.numpy as jnp
+from flax import linen as nn
 
 
 class CNN(nn.Module):

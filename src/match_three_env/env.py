@@ -1,21 +1,20 @@
 from typing import Any, Dict, Optional, Tuple, Union
 
 import chex
-from flax import struct
 import jax
-from jax import lax
 import jax.numpy as jnp
-from gymnax.environments import environment
-from gymnax.environments import spaces
+from flax import struct
+from gymnax.environments import environment, spaces
+from jax import lax
 
-from src.match_three.game_grid import (
+from match_three_env.game_grid import (
     K_MAX,
     K_MIN,
     MatchThreeGameGridFunctions,
     MatchThreeGameGridParams,
     MatchThreeGameGridStruct,
 )
-from src.match_three.utils import conv_action_to_swap_jit
+from match_three_env.utils import conv_action_to_swap_jit
 
 REWARD_MULTIPLIER = 1
 

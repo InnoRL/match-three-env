@@ -1,31 +1,26 @@
+import os
 from functools import partial
-import time
+
 import chex
-import gymnax
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
 import optax
 import orbax.checkpoint as ocp
-
-from tqdm import tqdm
 import wandb
-
-from src.algorithms.utils import (
+from models import CNN, Actor, Critic
+from tqdm import tqdm
+from utils import (
     cosine_annealing_with_warmup,
     encode_grid,
     rl_init,
     small_init,
 )
-from src.match_three.game_grid import GRID_SIZE
-from src.models import CNN, Actor, Critic
 
-from src.match_three.env import EnvParams, MatchThree
+from match_three_env.env import EnvParams, MatchThree
+from match_three_env.game_grid import GRID_SIZE
 
-import os
-
-
-NUM_ENVS = 2 
+NUM_ENVS = 2
 GAMMA = 0.99
 LAMBDA = 0.98
 LEARNING_RATE = 0.0001
@@ -195,7 +190,9 @@ def train():
         # Collect rollout using vmap over NUM_ENVS
         def _env_step(carry, _):
             train_state, keys, obses, states = carry
-            keys = vmap_split(keys, 2)  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
+            keys = vmap_split(
+                keys, 2
+            )  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
             # jax.debug.print("keys shape: {x}", x=keys.shape)
             # print("keys shape: ", keys.shape)
             keys, subkeys = keys[:, 0], keys[:, 1]
@@ -218,7 +215,9 @@ def train():
             ]
 
             # Step environment
-            keys = vmap_split(keys, 2)  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
+            keys = vmap_split(
+                keys, 2
+            )  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
             keys, subkeys = keys[:, 0], keys[:, 1]
             next_obses, next_states, rewards, dones, _ = vmap_step(
                 subkeys, states, actions, env_params
@@ -238,7 +237,9 @@ def train():
 
         # Reset environments
         key = train_state.key
-        keys = jax.random.split(key, num=(NUM_ENVS + 1))  # add one for key, NUM_ENVS for subkeys
+        keys = jax.random.split(
+            key, num=(NUM_ENVS + 1)
+        )  # add one for key, NUM_ENVS for subkeys
         key = keys[0]
         subkeys = keys[1:]
         obses, states = vmap_reset(subkeys, env_params)
@@ -356,7 +357,9 @@ def train():
         )
         print("Done computing gradients")
         # Update parameters
-        updates, new_opt_state = optimizer.update(grads, train_state.opt_state, params=train_state.params)
+        updates, new_opt_state = optimizer.update(
+            grads, train_state.opt_state, params=train_state.params
+        )
         new_params = optax.apply_updates(train_state.params, updates)
 
         # Update training state

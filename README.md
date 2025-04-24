@@ -1,7 +1,8 @@
-# match-three-env
-JAX-accelerated RL environment for match-three game
+# Match Three Gymnax Environment
 
-install gymnax (requirement)
-```
-pip install git+https://github.com/RobertTLange/gymnax.git@main
+## Getting Started
+
+Perform an editable install of the environment.
+```bash
+pip install -e .
 ```
