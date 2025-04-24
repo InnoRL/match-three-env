@@ -20,6 +20,10 @@ CASCADE_MAX_DEPTH = 100
 GRID_SIZE = 9
 MAX_GENERATION_ATTEMPTS = 25
 
+# TODO: remove this in the future
+K_MIN = 4
+K_MAX = 7
+
 # TODO: think about power-ups
 
 # TODO: there should a second, non-accelerated version that can render the physics frame-by-frame

@@ -9,18 +9,22 @@ from gymnax.environments import environment
 from gymnax.environments import spaces
 
 from match_three.game_grid import (
+    K_MAX,
+    K_MIN,
     MatchThreeGameGridFunctions,
     MatchThreeGameGridParams,
     MatchThreeGameGridStruct,
 )
+from match_three.utils import conv_action_to_swap_jit
 
 REWARD_MULTIPLIER = 1
+
 
 class GridSpace(spaces.Space):
     def __init__(
         self, grid_size: Tuple[int, int], grid_mask: chex.Array, n_colors: int
     ):
-        assert 4 <= n_colors <= 7
+        assert K_MIN <= n_colors <= K_MAX
         self.grid_size = grid_size
         self.grid_mask = grid_mask
         self.n_colors = n_colors
@@ -89,12 +93,13 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         action: Union[int, float, chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
+        grid_cell, direction = conv_action_to_swap_jit(params.grid_size, action)
         grid, matches = MatchThreeGameGridFunctions.apply_swap(
             key=key,
             state=state.grid,
             params=params.grid_params,
-            grid_cell=action[:2],
-            direction=action[2],
+            grid_cell=grid_cell,
+            direction=direction,
         )
 
         reward = self._compute_reward(matches.matches)
@@ -154,7 +159,7 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
                 "time": spaces.Discrete(params.max_steps_in_episode),
             }
         )
-        
+
     @staticmethod
     def _compute_reward(matches: chex.Array) -> chex.Array:
         """Compute reward = sum(matches[i] * c * ln(i + 1)) for each i."""
