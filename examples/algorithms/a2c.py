@@ -20,13 +20,15 @@ from utils import (
 from match_three_env.env import EnvParams, MatchThree
 from match_three_env.game_grid import GRID_SIZE
 
-NUM_ENVS = 2
+NUM_ENVS = 100
 GAMMA = 0.99
 LAMBDA = 0.98
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.00005 # Default is 0.0001
+GRADIENT_CLIP = 0.3 # default is 0.5
 NUM_UPDATES = 1000
 WARMUP_RATIO = 0.01
 PRECISION = "bfloat16"
+# PRECISION = "float32"
 
 CHECKPOINT_DIR = "./checkpoints"
 CHECKPOINT_INTERVAL = 100
@@ -55,9 +57,15 @@ def restore_model(ckpt_dir):
 
 
 # Combined network
+
+if PRECISION == "bfloat16":
+    precision_dtype = jnp.bfloat16
+else:
+    precision_dtype = jnp.float32
+
 class ActorCritic(nn.Module):
     action_dim: int
-    precision_dtype: jnp.dtype
+    precision_dtype: jnp.dtype = precision_dtype
 
     def setup(self):
         self.cnn = CNN(self.precision_dtype, rl_init_fn=rl_init)
@@ -126,10 +134,19 @@ def train():
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)
     dummy_input = jnp.zeros(
-        (GRID_SIZE, GRID_SIZE)
+        (GRID_SIZE, GRID_SIZE), dtype=jnp.int32
     )  # TODO: verify the actual input shape
     ac = ActorCritic(action_dim=num_actions, precision_dtype=precision_dtype)
     params = ac.init(subkey, dummy_input)
+    ac_apply = jax.jit(ac.apply)
+    
+    print("Dummy input shape: ", dummy_input.shape)
+    print("params keys: ", params.keys())
+    print("params['params'] keys: ", params['params'].keys())
+    print("max steps in episode: ", max_steps_in_episode)
+    print("num actions: ", num_actions)
+    print("num envs: ", NUM_ENVS)
+
     # NOTE: env_params are jnp.float32, but some of the operations are jnp.bfloat16.
     # This is manual mixed precision, done for performance reasons.
 
@@ -142,7 +159,7 @@ def train():
 
     # Initialize optimizer
     optimizer = optax.chain(
-        optax.clip_by_global_norm(0.5),
+        optax.clip_by_global_norm(GRADIENT_CLIP),
         optax.adamw(
             learning_rate=learning_rate_scheduler,
             # NOTE: commented out since they are default values
@@ -180,7 +197,7 @@ def train():
         # Vectorized functions
         vmap_reset = jax.vmap(env.reset, in_axes=(0, None))
         vmap_step = jax.vmap(env.step, in_axes=(0, 0, 0, None))
-        vmap_apply = jax.vmap(ac.apply, in_axes=(None, 0))
+        vmap_apply = jax.vmap(ac_apply, in_axes=(None, 0))
         get_action_fn = lambda params, obs, key: ac.apply(
             params, obs, key, method=ac.get_action
         )
@@ -251,21 +268,26 @@ def train():
         carry, rollouts = jax.lax.scan(
             _env_step, carry, jnp.arange(max_steps_in_episode)
         )
+        # Transpose the rollouts to get from  (max_steps_in_episode, NUM_ENVS, ...) to (NUM_ENVS, max_steps_in_episode, ...)
+        rollouts = jax.tree.map(lambda x: jnp.swapaxes(x, 0, 1), rollouts)
+        # print("rollouts shape: ", rollouts["obs_batch"].shape)
         # train_state is not changed in _env_step, so we need to update only the key
         train_state = train_state.replace(key=key)
-        print("Done collecting rollouts")
+        # print("Done collecting rollouts")
 
         # Compute advantages and returns
         # Get (NUM_ENVS) last values
-        _, last_values = vmap_apply(train_state.params, rollouts["obs_batch"][-1])
-        last_values = (
-            last_values.squeeze()
-        )  # TODO: check if this is correct. NOTE: should be correct.
+        _, last_values = vmap_apply(train_state.params, rollouts["obs_batch"][:, -1])
+        last_values = last_values.squeeze() 
 
         # NOTE: here rewards, dones, values are (max_steps_in_episode,) and last_value is scalar.
         def _compute_gae_single_env(rewards, dones, values, last_value):
             """Compute GAE for a single environment trajectory."""
             last_advantage = 0.0
+            # print("rewards shape: ", rewards.shape)
+            # print("dones shape: ", dones.shape)
+            # print("values shape: ", values.shape)
+            # print("last_value shape: ", last_value.shape)
 
             # Reverse computation through time
             def _body(carry, xs):
@@ -291,71 +313,97 @@ def train():
 
         # Compute GAE for each environment
         # NOTE: Shape of rewards, dones, values is (max_steps_in_episode, NUM_ENVS,). This is probably due to scan()
-        advantages, returns = jax.vmap(_compute_gae_single_env, in_axes=(1, 1, 1, 0))(
+        advantages, returns = jax.vmap(_compute_gae_single_env, in_axes=(0, 0, 0, 0))(
             rollouts["rewards_batch"],  # (NUM_ENVS, max_steps_in_episode)
             rollouts["dones_batch"],  # (NUM_ENVS, max_steps_in_episode)
             rollouts["values_batch"],  # (NUM_ENVS, max_steps_in_episode)
             last_values,  # (NUM_ENVS,)
         )
-        print("Done computing GAE")
+        # print("Done computing GAE")
 
-        # NOTE: Onwards we are no longer using vmap.
-        # Flatten batch.
-        b_obs = rollouts["obs_batch"].reshape((-1, GRID_SIZE, GRID_SIZE))
-        b_actions = rollouts["actions_batch"].flatten()
-        b_log_probs = rollouts["log_probs_batch"].flatten()
-        b_advantages = advantages.flatten()
-        b_returns = returns.flatten()
+        def _single_loss_fn(params, obs, action, old_log_prob, advantage, return_):
+            # print("obs shape: ", obs.shape)
+            # print("obs dtype: ", obs.dtype)
+            # print("action shape: ", action.shape)
+            # print("old_log_prob shape: ", old_log_prob.shape)
+            # print("advantage shape: ", advantage.shape)
+            # print("return_ shape: ", return_.shape)
+            
+            # print("params keys: ", params.keys())
+            # print("params['params'] keys: ", params['params'].keys())
+            
+            logits, value = ac.apply(params, obs)
+            logits = logits.astype(jnp.float32)
+            value = value.astype(jnp.float32)
+            log_prob = jax.nn.log_softmax(logits)[action]
 
-        # NOTE: after flattening the shapes are:
-        # b_obs:        (NUM_ENVS * max_steps_in_episode, GRID_SIZE, GRID_SIZE) float32
-        # b_actions:    (NUM_ENVS * max_steps_in_episode,) int32
-        # b_log_probs:  (NUM_ENVS * max_steps_in_episode,) float32
-        # b_advantages: (NUM_ENVS * max_steps_in_episode,) float32
-        # b_returns:    (NUM_ENVS * max_steps_in_episode,) float32
-
-        # Calculate loss and update.
-        # NOTE: No need to wrap this in a jit function since it will be wrapped in value_and_grad
-        def _loss_fn(params, obs, actions, old_log_probs, advantages, returns):
-            # NOTE: We need to ensure that the gradients are computed using float32.
-            # Calculate policy loss
-            logits, values = jax.vmap(ac.apply, in_axes=(None, 0))(params, obs)
-            logits = logits.astype(jnp.float32)  # ensure logits are float32
-            # logits are of shape (NUM_ENVS * max_steps_in_episode, num_actions)
-            values = values.astype(jnp.float32)  # ensure values are float32
-            values = values.squeeze()
-            # print("logits shape: ", logits.shape)
-            # print("actions shape: ", actions.shape)
-            log_probs = jax.nn.log_softmax(logits, axis=1)[
-                jnp.arange(NUM_ENVS * max_steps_in_episode), actions
-            ]
-
-            # Policy gradient loss
-            advantages = advantages.astype(jnp.float32)  # ensure advantages are float32
-            returns = returns.astype(jnp.float32)  # ensure returns are float32
-            ratio = jnp.exp(log_probs - old_log_probs)
-            policy_loss1 = ratio * advantages
-            policy_loss2 = jnp.clip(ratio, 1.0 - 0.2, 1.0 + 0.2) * advantages
+            advantage = advantage.astype(jnp.float32)
+            return_ = return_.astype(jnp.float32)
+            ratio = jnp.exp(log_prob - old_log_prob)
+            policy_loss1 = ratio * advantage
+            policy_loss2 = jnp.clip(ratio, 1.0 - 0.2, 1.0 + 0.2) * advantage
             policy_loss = -jnp.minimum(policy_loss1, policy_loss2).mean()
-
-            # Value loss
-            value_loss = 0.5 * jnp.square(values - returns).mean()
-
-            # Entropy bonus
+            value_loss = 0.5 * jnp.square(value - return_).mean()
             entropy = -jnp.sum(
                 jax.nn.softmax(logits) * jax.nn.log_softmax(logits), axis=-1
             ).mean()
-
             total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+            return total_loss, (policy_loss, value_loss, entropy)
+
+        def _rollout_loss_fn(params, obs, actions, old_log_probs, advantages, returns):
+            # print("obs shape: ", obs.shape)
+            # print("actions shape: ", actions.shape)
+            # print("old_log_probs shape: ", old_log_probs.shape)
+            # print("advantages shape: ", advantages.shape)
+            # print("returns shape: ", returns.shape)
+            losses, aux = jax.vmap(_single_loss_fn, in_axes=(None, 0, 0, 0, 0, 0))(
+                params, obs, actions, old_log_probs, advantages, returns
+            )
+            total_loss = losses[0].mean()
+            policy_loss = aux[0].mean()
+            value_loss = aux[1].mean()
+            entropy = aux[2].mean()
+            return total_loss, (policy_loss, value_loss, entropy)
+
+        def _batch_loss_fn(
+            params,
+            obs_batch,
+            actions_batch,
+            old_log_probs_batch,
+            advantages_batch,
+            returns_batch,
+        ):
+            # print("obs_batch shape: ", obs_batch.shape)
+            # print("actions_batch shape: ", actions_batch.shape)
+            # print("old_log_probs_batch shape: ", old_log_probs_batch.shape)
+            # print("advantages_batch shape: ", advantages_batch.shape)
+            # print("returns_batch shape: ", returns_batch.shape)
+            losses, aux = jax.vmap(_rollout_loss_fn, in_axes=(None, 0, 0, 0, 0, 0))(
+                params,
+                obs_batch,
+                actions_batch,
+                old_log_probs_batch,
+                advantages_batch,
+                returns_batch,
+            )
+            total_loss = losses[0].mean()
+            policy_loss = aux[0].mean()
+            value_loss = aux[1].mean()
+            entropy = aux[2].mean()
             return total_loss, (policy_loss, value_loss, entropy)
 
         # TODO: will the grads be computed correctly since the return of _loss_fn is a tuple?
         # NOTE: solved by using has_aux=True. This means that the return of _loss_fn is a tuple of (loss, aux).
-        grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+        grad_fn = jax.value_and_grad(_batch_loss_fn, has_aux=True)
         (total_loss, (policy_loss, value_loss, entropy)), grads = grad_fn(
-            train_state.params, b_obs, b_actions, b_log_probs, b_advantages, b_returns
+            train_state.params,
+            rollouts["obs_batch"],
+            rollouts["actions_batch"],
+            rollouts["log_probs_batch"],
+            advantages,
+            returns,
         )
-        print("Done computing gradients")
+        # print("Done computing gradients")
         # Update parameters
         updates, new_opt_state = optimizer.update(
             grads, train_state.opt_state, params=train_state.params
@@ -367,14 +415,15 @@ def train():
             params=new_params,
             opt_state=new_opt_state,
         )
-        print("Done updating parameters")
+        # print("Done updating parameters")
         # Logging
         metrics = {
+            "learning_rate": learning_rate_scheduler(new_opt_state[1][0].count), # Access count of the adam state
             "total_loss": total_loss,
             "policy_loss": policy_loss,
             "value_loss": value_loss,
             "entropy": entropy,
-            "returns": b_returns.mean(),
+            "returns": returns.mean(),
         }
 
         return new_train_state, metrics
@@ -388,53 +437,48 @@ def train():
     jit_update_step_fn = jax.jit(update_step)
 
     # Setup checkpointing
-    ckpt_dir = CHECKPOINT_DIR
+    ckpt_dir = os.path.abspath(CHECKPOINT_DIR)
     os.makedirs(ckpt_dir, exist_ok=True)
     # checkpointer = ocp.PyTreeCheckpointer()
     # options = ocp.CheckpointManagerOptions(
     #     max_to_keep=CHECKPOINT_MAX_TO_KEEP, save_interval_steps=CHECKPOINT_INTERVAL
     # )
     # mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options)
+    
+    # Initialize AsyncCheckpointer and CheckpointManager
     checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
-    mngr = ocp.CheckpointManager(
-        ckpt_dir,
-        checkpointer,
-        options=ocp.CheckpointManagerOptions(
-            max_to_keep=CHECKPOINT_MAX_TO_KEEP,
-            save_interval_steps=CHECKPOINT_INTERVAL,
-            step_prefix="checkpoint_",
-        ),
+    options = ocp.CheckpointManagerOptions(
+        max_to_keep=CHECKPOINT_MAX_TO_KEEP,
+        save_interval_steps=CHECKPOINT_INTERVAL,
+        step_prefix="checkpoint_",
     )
 
+    # Initialize CheckpointManager with options
+    mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options=options)
+    
     # Training loop
     with tqdm(range(NUM_UPDATES), desc="Training") as pbar:
         for i in pbar:
-            train_state, metrics = update_step(train_state, None)
-            # train_state, metrics = jit_update_step_fn(train_state, None)
+            # train_state, metrics = update_step(train_state, None)
+            train_state, metrics = jit_update_step_fn(train_state, None)
 
             # Logging
             if i % 10 == 0:
                 pbar.set_postfix(
                     {
-                        "policy_loss": f"{metrics[0]:.3f}",
-                        "value_loss": f"{metrics[1]:.3f}",
-                        "entropy": f"{metrics[2]:.3f}",
+                        "policy_loss": f"{metrics['policy_loss']:.3f}",
+                        "value_loss": f"{metrics['value_loss']:.3f}",
+                        "entropy": f"{metrics['entropy']:.3f}",
                     }
                 )
                 wandb.log(metrics)
 
             # NOTE: we dont need the condition here since orbax will deal with intervals
-            # mngr.save(
-            #     i,
-            #     args=ocp.args.Composite(
-            #         params=ocp.args.StandardSave(train_state.params),
-            #         step=ocp.args.StandardSave(i),
-            #     ),
-            # )
+            # save_args = ocp.SaveArgs(aggregate=True)
             mngr.save(
                 step=i,
-                items={"params": train_state.params, "step": i},
-                save_kwargs={"save_args": ocp.SaveArgs(aggregate=True)},
+                items={"params": train_state.params, "step": i},  # Ensure this is a dictionary
+                # save_kwargs={"save_args": save_args},  # Pass SaveArgs correctly
             )
     wandb.finish()
 

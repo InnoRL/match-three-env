@@ -1,5 +1,4 @@
 from typing import Callable
-
 import jax.numpy as jnp
 from flax import linen as nn
 
@@ -30,10 +29,12 @@ class Actor(nn.Module):
         # logits should not be bfloat16
         logits = nn.Dense(
             self.action_dim,
-            dtype=jnp.float32,
+            # dtype=jnp.float32,
+            dtype=self.precision_dtype,  # NOTE: we are forced to use bfloat16 here. float32 will cause an error (I do not know why)
             param_dtype=jnp.float32,
             kernel_init=self.small_init_fn(),
         )(x)
+        logits = logits.astype(jnp.float32)
         return logits
 
     # def get_action(self, params, x, rng):
