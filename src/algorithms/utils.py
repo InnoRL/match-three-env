@@ -1,17 +1,17 @@
 import jax
 import jax.numpy as jnp
 import optax
-from match_three.game_grid import K_MAX
+from src.match_three.game_grid import K_MAX
 
 from jax.nn.initializers import variance_scaling
 
 @jax.jit
 def encode_grid(grid):
     """One-hot encode the grid"""
+    # TODO: check if this is correct
     vals = jnp.arange(0, K_MAX + 1)
-    vals = vals.at[0].set(-1)
     vals = vals[:, jnp.newaxis, jnp.newaxis]
-    return jnp.array(grid == vals, dtype=jnp.float32)
+    return jnp.array(grid == vals, dtype=jnp.float32).transpose(1, 2, 0)
 
 
 # ----------------------
@@ -19,11 +19,11 @@ def encode_grid(grid):
 # ----------------------
 def rl_init(scale: float = 2.0, mode: str = 'fan_in'):
     """Kaiming/He initialization optimized for ReLU networks in RL"""
-    return variance_scaling(scale, mode, 'truncated_normal')
+    return variance_scaling(scale, mode, 'truncated_normal', dtype=jnp.float32)
 
 def small_init(scale: float = 0.01):
     """Small initialization for value/policy heads"""
-    return variance_scaling(scale, 'fan_in', 'truncated_normal')
+    return variance_scaling(scale, 'fan_in', 'truncated_normal', dtype=jnp.float32)
 
 # ----------------------
 def cosine_annealing_with_warmup(warmup_steps, total_steps, base_lr=0.1):

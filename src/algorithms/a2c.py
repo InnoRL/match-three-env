@@ -11,21 +11,21 @@ import orbax.checkpoint as ocp
 from tqdm import tqdm
 import wandb
 
-from algorithms.utils import (
+from src.algorithms.utils import (
     cosine_annealing_with_warmup,
     encode_grid,
     rl_init,
     small_init,
 )
-from match_three.game_grid import GRID_SIZE
-from models import CNN, Actor, Critic
+from src.match_three.game_grid import GRID_SIZE
+from src.models import CNN, Actor, Critic
 
-from match_three.env import EnvParams, MatchThree
+from src.match_three.env import EnvParams, MatchThree
 
 import os
 
 
-NUM_ENVS = 100
+NUM_ENVS = 2 
 GAMMA = 0.99
 LAMBDA = 0.98
 LEARNING_RATE = 0.0001
@@ -85,8 +85,10 @@ class ActorCritic(nn.Module):
 
     def get_action(self, x, key):
         encoded = encode_grid(x)
+        # print("encoded shape: ", encoded.shape)
         features = self.cnn(encoded)
         logits = self.actor(features)
+        # key = self.make_rng("key")
         action = jax.random.categorical(key, logits)
         return action
 
@@ -118,6 +120,13 @@ def train():
     max_steps_in_episode = env_params.max_steps_in_episode
     num_actions = env.num_actions
 
+    # # test encoder
+    # key = jax.random.PRNGKey(0)
+    # key, subkey = jax.random.split(key)
+    # obs, state = env.reset(subkey, env_params)
+    # enc = encode_grid(obs)
+    # print(enc, enc.shape)
+
     # Initialize networks
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)
@@ -125,7 +134,7 @@ def train():
         (GRID_SIZE, GRID_SIZE)
     )  # TODO: verify the actual input shape
     ac = ActorCritic(action_dim=num_actions, precision_dtype=precision_dtype)
-    env_params = ac.init(subkey, dummy_input)
+    params = ac.init(subkey, dummy_input)
     # NOTE: env_params are jnp.float32, but some of the operations are jnp.bfloat16.
     # This is manual mixed precision, done for performance reasons.
 
@@ -148,10 +157,9 @@ def train():
             # eps=1e-8,
         ),
     )
-    opt_state = optimizer.init(env_params)
-
+    opt_state = optimizer.init(params)
     # Initialize training state
-    train_state = TrainState(env_params, opt_state, key)
+    train_state = TrainState(params=params, opt_state=opt_state, key=key)
 
     # Training loop
     def update_step(train_state, _) -> tuple[TrainState, dict]:
@@ -178,13 +186,19 @@ def train():
         vmap_reset = jax.vmap(env.reset, in_axes=(0, None))
         vmap_step = jax.vmap(env.step, in_axes=(0, 0, 0, None))
         vmap_apply = jax.vmap(ac.apply, in_axes=(None, 0))
-        vmap_get_action = jax.vmap(ac.get_action, in_axes=(0, 0))
+        get_action_fn = lambda params, obs, key: ac.apply(
+            params, obs, key, method=ac.get_action
+        )
+        vmap_get_action = jax.vmap(get_action_fn, in_axes=(None, 0, 0))
         vmap_split = jax.vmap(jax.random.split, in_axes=(0, None))
 
         # Collect rollout using vmap over NUM_ENVS
         def _env_step(carry, _):
             train_state, keys, obses, states = carry
-            keys, subkeys = vmap_split(keys)
+            keys = vmap_split(keys, 2)  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
+            # jax.debug.print("keys shape: {x}", x=keys.shape)
+            # print("keys shape: ", keys.shape)
+            keys, subkeys = keys[:, 0], keys[:, 1]
 
             # Get actions and values
             logits, values = vmap_apply(train_state.params, obses)
@@ -192,15 +206,20 @@ def train():
             # NOTE: squeeze removes one or more length-1 axes from array.
             # This means that it should not be a problem
             values = values.squeeze()
-            actions = vmap_get_action(obses, subkeys)
+            actions = vmap_get_action(train_state.params, obses, subkeys)
             # TODO: check if this will work. do we need to do a vmap here?
             # NOTE: solved by using axis=1
+            # print("obses shape: ", obses.shape)
+            # print("values shape: ", values.shape)
+            # print("logits shape: ", logits.shape)
+            # print("actions shape: ", actions.shape)
             log_probs = jax.nn.log_softmax(logits, axis=1)[
                 jnp.arange(NUM_ENVS), actions
             ]
 
             # Step environment
-            keys, subkeys = vmap_split(keys)
+            keys = vmap_split(keys, 2)  # IN shape (NUM_ENVS, 2); OUT shape (NUM_ENVS, 2, 2)
+            keys, subkeys = keys[:, 0], keys[:, 1]
             next_obses, next_states, rewards, dones, _ = vmap_step(
                 subkeys, states, actions, env_params
             )
@@ -218,7 +237,10 @@ def train():
             return carry, data
 
         # Reset environments
-        key, subkeys = jax.random.split(key, num=NUM_ENVS)
+        key = train_state.key
+        keys = jax.random.split(key, num=(NUM_ENVS + 1))  # add one for key, NUM_ENVS for subkeys
+        key = keys[0]
+        subkeys = keys[1:]
         obses, states = vmap_reset(subkeys, env_params)
         # we dont need to split the keys here because they will be split in _env_step
         carry = (train_state, subkeys, obses, states)
@@ -229,7 +251,8 @@ def train():
             _env_step, carry, jnp.arange(max_steps_in_episode)
         )
         # train_state is not changed in _env_step, so we need to update only the key
-        train_state = train_state._replace(key=train_state.key)
+        train_state = train_state.replace(key=key)
+        print("Done collecting rollouts")
 
         # Compute advantages and returns
         # Get (NUM_ENVS) last values
@@ -266,12 +289,14 @@ def train():
             return advantages, returns
 
         # Compute GAE for each environment
-        advantages, returns = jax.vmap(_compute_gae_single_env, in_axes=(0, 0, 0, 0))(
+        # NOTE: Shape of rewards, dones, values is (max_steps_in_episode, NUM_ENVS,). This is probably due to scan()
+        advantages, returns = jax.vmap(_compute_gae_single_env, in_axes=(1, 1, 1, 0))(
             rollouts["rewards_batch"],  # (NUM_ENVS, max_steps_in_episode)
             rollouts["dones_batch"],  # (NUM_ENVS, max_steps_in_episode)
             rollouts["values_batch"],  # (NUM_ENVS, max_steps_in_episode)
             last_values,  # (NUM_ENVS,)
         )
+        print("Done computing GAE")
 
         # NOTE: Onwards we are no longer using vmap.
         # Flatten batch.
@@ -293,12 +318,16 @@ def train():
         def _loss_fn(params, obs, actions, old_log_probs, advantages, returns):
             # NOTE: We need to ensure that the gradients are computed using float32.
             # Calculate policy loss
-            logits, values = ac.apply(params, obs)
+            logits, values = jax.vmap(ac.apply, in_axes=(None, 0))(params, obs)
             logits = logits.astype(jnp.float32)  # ensure logits are float32
             # logits are of shape (NUM_ENVS * max_steps_in_episode, num_actions)
             values = values.astype(jnp.float32)  # ensure values are float32
             values = values.squeeze()
-            log_probs = jax.nn.log_softmax(logits)[actions]
+            # print("logits shape: ", logits.shape)
+            # print("actions shape: ", actions.shape)
+            log_probs = jax.nn.log_softmax(logits, axis=1)[
+                jnp.arange(NUM_ENVS * max_steps_in_episode), actions
+            ]
 
             # Policy gradient loss
             advantages = advantages.astype(jnp.float32)  # ensure advantages are float32
@@ -325,17 +354,17 @@ def train():
         (total_loss, (policy_loss, value_loss, entropy)), grads = grad_fn(
             train_state.params, b_obs, b_actions, b_log_probs, b_advantages, b_returns
         )
-
+        print("Done computing gradients")
         # Update parameters
-        updates, new_opt_state = optimizer.update(grads, train_state.opt_state)
+        updates, new_opt_state = optimizer.update(grads, train_state.opt_state, params=train_state.params)
         new_params = optax.apply_updates(train_state.params, updates)
 
         # Update training state
-        new_train_state = train_state._replace(
+        new_train_state = train_state.replace(
             params=new_params,
             opt_state=new_opt_state,
         )
-
+        print("Done updating parameters")
         # Logging
         metrics = {
             "total_loss": total_loss,
@@ -358,16 +387,27 @@ def train():
     # Setup checkpointing
     ckpt_dir = CHECKPOINT_DIR
     os.makedirs(ckpt_dir, exist_ok=True)
-    checkpointer = ocp.PyTreeCheckpointer()
-    options = ocp.CheckpointManagerOptions(
-        max_to_keep=CHECKPOINT_MAX_TO_KEEP, save_interval_steps=CHECKPOINT_INTERVAL
+    # checkpointer = ocp.PyTreeCheckpointer()
+    # options = ocp.CheckpointManagerOptions(
+    #     max_to_keep=CHECKPOINT_MAX_TO_KEEP, save_interval_steps=CHECKPOINT_INTERVAL
+    # )
+    # mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options)
+    checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
+    mngr = ocp.CheckpointManager(
+        ckpt_dir,
+        checkpointer,
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=CHECKPOINT_MAX_TO_KEEP,
+            save_interval_steps=CHECKPOINT_INTERVAL,
+            step_prefix="checkpoint_",
+        ),
     )
-    mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options)
 
     # Training loop
     with tqdm(range(NUM_UPDATES), desc="Training") as pbar:
         for i in pbar:
-            train_state, metrics = jit_update_step_fn(train_state, None)
+            train_state, metrics = update_step(train_state, None)
+            # train_state, metrics = jit_update_step_fn(train_state, None)
 
             # Logging
             if i % 10 == 0:
@@ -381,12 +421,17 @@ def train():
                 wandb.log(metrics)
 
             # NOTE: we dont need the condition here since orbax will deal with intervals
+            # mngr.save(
+            #     i,
+            #     args=ocp.args.Composite(
+            #         params=ocp.args.StandardSave(train_state.params),
+            #         step=ocp.args.StandardSave(i),
+            #     ),
+            # )
             mngr.save(
-                i,
-                args=ocp.args.Composite(
-                    params=ocp.args.StandardSave(train_state.params),
-                    step=ocp.args.StandardSave(i),
-                ),
+                step=i,
+                items={"params": train_state.params, "step": i},
+                save_kwargs={"save_args": ocp.SaveArgs(aggregate=True)},
             )
     wandb.finish()
 

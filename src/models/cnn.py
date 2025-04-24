@@ -11,7 +11,8 @@ class CNN(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        # Input shape: (batch_size, 9, 9, K_MAX+1)
+        # Input shape: (9, 9, K_MAX+1)
+        # print("CNN input shape: ", x.shape)
         x = nn.Conv(
             features=32,
             kernel_size=(3, 3),
@@ -39,5 +40,6 @@ class CNN(nn.Module):
             kernel_init=self.rl_init_fn(),
         )(x)
         x = nn.relu(x)
-        x = x.reshape((x.shape[0], -1))  # Flatten
+        x = x.reshape((-1))  # Flatten
+        # print("CNN output shape: ", x.shape)
         return x

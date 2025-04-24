@@ -8,14 +8,14 @@ import jax.numpy as jnp
 from gymnax.environments import environment
 from gymnax.environments import spaces
 
-from match_three.game_grid import (
+from src.match_three.game_grid import (
     K_MAX,
     K_MIN,
     MatchThreeGameGridFunctions,
     MatchThreeGameGridParams,
     MatchThreeGameGridStruct,
 )
-from match_three.utils import conv_action_to_swap_jit
+from src.match_three.utils import conv_action_to_swap_jit
 
 REWARD_MULTIPLIER = 1
 
@@ -106,28 +106,28 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
 
         state = EnvState(grid=grid, time=state.time + 1)
         done = self.is_terminal(state, params)
-        # info = {"discount": self.discount(state, params)}
+        info = {"discount": self.discount(state, params)}
         return (
             lax.stop_gradient(self.get_obs(state)),
             lax.stop_gradient(state),
             reward,
             done,
-            # info,
+            info,
         )
 
     def reset_env(
         self, key: chex.PRNGKey, params: EnvParams
     ) -> Tuple[chex.Array, EnvState]:
         """Reset environment state by generating new grid."""
-        key, grid = MatchThreeGameGridFunctions.generate_game_grid(
+        key, state_grid = MatchThreeGameGridFunctions.generate_game_grid(
             key, params.grid_params
         )
-        state = EnvState(grid=grid, time=0)
+        state = EnvState(grid=state_grid, time=0)
         return self.get_obs(state, params, key), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
         """Return observation from raw state."""
-        return state.grid
+        return state.grid.grid
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""

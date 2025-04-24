@@ -13,16 +13,26 @@ class Actor(nn.Module):
     @nn.compact
     def __call__(self, x):
         # x is the output from CNN
-        x = nn.Dense(256, dtype=self.precision_dtype, param_dtype=jnp.float32)(x)
+        x = nn.Dense(
+            256,
+            dtype=self.precision_dtype,
+            param_dtype=jnp.float32,
+            kernel_init=self.rl_init_fn(),
+        )(x)
         x = nn.relu(x)
-        x = nn.Dense(128, dtype=self.precision_dtype, param_dtype=jnp.float32)(x)
+        x = nn.Dense(
+            128,
+            dtype=self.precision_dtype,
+            param_dtype=jnp.float32,
+            kernel_init=self.rl_init_fn(),
+        )(x)
         x = nn.relu(x)
         # logits should not be bfloat16
         logits = nn.Dense(
             self.action_dim,
             dtype=jnp.float32,
             param_dtype=jnp.float32,
-            kernel_init=self.small_init_fn,
+            kernel_init=self.small_init_fn(),
         )(x)
         return logits
 

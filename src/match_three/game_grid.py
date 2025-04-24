@@ -4,6 +4,7 @@ from flax import struct
 import jax
 from jax import numpy as jnp
 
+
 def get_swap_direction(direction: int) -> Tuple[int, int]:
     return jax.lax.switch(
         direction,
@@ -293,6 +294,64 @@ class MatchThreeGameGridFunctions:
 
     @staticmethod
     def __collapse_grid(grid: chex.Array) -> chex.Array:
+        def process_column(col_v: chex.Array) -> chex.Array:
+            def cond_fn(carry):
+                p_empty, p_symbol, _ = carry
+                return jnp.logical_and(p_empty > 0, p_symbol > 0)
+
+            def body_fn(carry):
+                p_empty, p_symbol, col_v = carry
+                # jax.debug.print(
+                #     "p_empty: {p_empty}, p_symbol: {p_symbol}",
+                #     p_empty=p_empty,
+                #     p_symbol=p_symbol,
+                # )
+                # print(f"p_empty: {p_empty}, p_symbol: {p_symbol}")
+                p_empty = jax.lax.cond(
+                    col_v.at[p_empty].get() == 0, lambda: p_empty, lambda: p_empty - 1
+                )  # if cell is empty then wait
+                p_symbol = jax.lax.cond(
+                    jnp.logical_and(p_symbol < p_empty, col_v.at[p_symbol].get() > 0),
+                    lambda: p_symbol,
+                    lambda: p_symbol - 1,
+                )  # if cell is symbol and higher than empty cell then wait
+                p_empty_val = col_v.at[p_empty].get()
+                p_symbol_val = col_v.at[p_symbol].get()
+                can_swap = jnp.logical_and(
+                    p_symbol < p_empty,
+                    jnp.logical_and(p_empty_val == 0, p_symbol_val > 0),
+                )
+
+                # jax.debug.print("can_swap: {can_swap}; p_empty: {p_empty}; p_symbol: {p_symbol}", can_swap=can_swap, p_empty=p_empty, p_symbol=p_symbol)
+
+                col_v = jax.lax.cond(
+                    can_swap,
+                    lambda: col_v.at[p_empty]
+                    .set(p_symbol_val)
+                    .at[p_symbol]
+                    .set(p_empty_val),
+                    lambda: col_v,
+                )
+                return p_empty, p_symbol, col_v
+
+            p_empty = GRID_SIZE  # get the index of the first empty cell from the bottom
+            p_symbol = (
+                GRID_SIZE  # get the index of the first non-empty cell from the bottom
+            )
+
+            _, _, col_v = jax.lax.while_loop(
+                cond_fn, body_fn, (p_empty, p_symbol, col_v)
+            )
+            return col_v
+
+        processed_cols = jax.vmap(process_column)(grid.T)
+        # col_v = process_column(grid.at[:, -1].get())
+        # print(col_v)
+        # processed_cols = grid.at[:, -1].set(col_v)
+        return processed_cols.T
+
+    @staticmethod
+    def __collapse_grid_deprecated(grid: chex.Array) -> chex.Array:
         def process_column(col_v: chex.Array) -> chex.Array:
             col_i = jnp.arange(0, 9)
             col_w = jnp.astype(col_v == -1, jnp.int4) - jnp.astype(col_v == 0, jnp.int4)
