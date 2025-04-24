@@ -26,6 +26,7 @@ class Actor(nn.Module):
             kernel_init=self.rl_init_fn(),
         )(x)
         x = nn.relu(x)
+        x = nn.LayerNorm()(x) # Introduced for stability
         # logits should not be bfloat16
         logits = nn.Dense(
             self.action_dim,

@@ -6,7 +6,8 @@ build-backend = "hatchling.build"
 name = "match_three_env"
 version = "0.0.1"
 dependencies = [
-    "jax>=0.6.0",
+    "jax>=0.5.2",
+    "jaxlib>=0.5.2",
     "matplotlib>=3.10.1",
     "tqdm>=4.67.1",
     "ipykernel>=6.29.5",
@@ -15,6 +16,8 @@ dependencies = [
     "flax>=0.10.5",
     "distrax>=0.1.5",
     "wandb>=0.19.10",
+    "orbax-checkpoint>=0.4.0",
+    "optax>=0.1.10",
 ]
 requires-python = ">=3.10"
 readme = "README.md"

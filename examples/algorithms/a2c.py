@@ -20,12 +20,12 @@ from utils import (
 from match_three_env.env import EnvParams, MatchThree
 from match_three_env.game_grid import GRID_SIZE
 
-NUM_ENVS = 100
+NUM_ENVS = 3
 GAMMA = 0.99
 LAMBDA = 0.98
-LEARNING_RATE = 0.00005 # Default is 0.0001
-GRADIENT_CLIP = 0.3 # default is 0.5
-NUM_UPDATES = 1000
+LEARNING_RATE = 0.001  # Default is 0.0001
+GRADIENT_CLIP = 0.3  # default is 0.5
+NUM_UPDATES = 4000
 WARMUP_RATIO = 0.01
 PRECISION = "bfloat16"
 # PRECISION = "float32"
@@ -62,6 +62,7 @@ if PRECISION == "bfloat16":
     precision_dtype = jnp.bfloat16
 else:
     precision_dtype = jnp.float32
+
 
 class ActorCritic(nn.Module):
     action_dim: int
@@ -139,10 +140,10 @@ def train():
     ac = ActorCritic(action_dim=num_actions, precision_dtype=precision_dtype)
     params = ac.init(subkey, dummy_input)
     ac_apply = jax.jit(ac.apply)
-    
+
     print("Dummy input shape: ", dummy_input.shape)
     print("params keys: ", params.keys())
-    print("params['params'] keys: ", params['params'].keys())
+    print("params['params'] keys: ", params["params"].keys())
     print("max steps in episode: ", max_steps_in_episode)
     print("num actions: ", num_actions)
     print("num envs: ", NUM_ENVS)
@@ -278,7 +279,7 @@ def train():
         # Compute advantages and returns
         # Get (NUM_ENVS) last values
         _, last_values = vmap_apply(train_state.params, rollouts["obs_batch"][:, -1])
-        last_values = last_values.squeeze() 
+        last_values = last_values.squeeze()
 
         # NOTE: here rewards, dones, values are (max_steps_in_episode,) and last_value is scalar.
         def _compute_gae_single_env(rewards, dones, values, last_value):
@@ -328,25 +329,30 @@ def train():
             # print("old_log_prob shape: ", old_log_prob.shape)
             # print("advantage shape: ", advantage.shape)
             # print("return_ shape: ", return_.shape)
-            
+
             # print("params keys: ", params.keys())
             # print("params['params'] keys: ", params['params'].keys())
-            
+
             logits, value = ac.apply(params, obs)
             logits = logits.astype(jnp.float32)
             value = value.astype(jnp.float32)
+            # Polocy loss
             log_prob = jax.nn.log_softmax(logits)[action]
 
             advantage = advantage.astype(jnp.float32)
             return_ = return_.astype(jnp.float32)
-            ratio = jnp.exp(log_prob - old_log_prob)
-            policy_loss1 = ratio * advantage
-            policy_loss2 = jnp.clip(ratio, 1.0 - 0.2, 1.0 + 0.2) * advantage
-            policy_loss = -jnp.minimum(policy_loss1, policy_loss2).mean()
+            # ratio = jnp.exp(log_prob - old_log_prob)
+            # policy_loss1 = ratio * advantage
+            # policy_loss2 = jnp.clip(ratio, 1.0 - 0.2, 1.0 + 0.2) * advantage
+            # policy_loss = -jnp.minimum(policy_loss1, policy_loss2).mean()
+            policy_loss = jnp.mean(-log_prob * advantage)
+
+            # Value loss
             value_loss = 0.5 * jnp.square(value - return_).mean()
-            entropy = -jnp.sum(
-                jax.nn.softmax(logits) * jax.nn.log_softmax(logits), axis=-1
-            ).mean()
+
+            # Entropy bonus
+            probs = jax.nn.softmax(logits)
+            entropy = -jnp.sum(probs * jnp.log(probs), axis=-1).mean()  # we dont need mean in single loss fn.
             total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
             return total_loss, (policy_loss, value_loss, entropy)
 
@@ -394,14 +400,16 @@ def train():
 
         # TODO: will the grads be computed correctly since the return of _loss_fn is a tuple?
         # NOTE: solved by using has_aux=True. This means that the return of _loss_fn is a tuple of (loss, aux).
+        returns_for_grads = (returns - returns.mean()) / (returns.std() + 1e-8)  # Standardize returns. done for stability.
+        advantages_for_grads = (advantages - advantages.mean()) / (advantages.std() + 1e-8)  # Standardize advantages. done for stability.
         grad_fn = jax.value_and_grad(_batch_loss_fn, has_aux=True)
         (total_loss, (policy_loss, value_loss, entropy)), grads = grad_fn(
             train_state.params,
             rollouts["obs_batch"],
             rollouts["actions_batch"],
             rollouts["log_probs_batch"],
-            advantages,
-            returns,
+            advantages_for_grads,
+            returns_for_grads,
         )
         # print("Done computing gradients")
         # Update parameters
@@ -418,7 +426,9 @@ def train():
         # print("Done updating parameters")
         # Logging
         metrics = {
-            "learning_rate": learning_rate_scheduler(new_opt_state[1][0].count), # Access count of the adam state
+            "learning_rate": learning_rate_scheduler(
+                new_opt_state[1][0].count
+            ),  # Access count of the adam state
             "total_loss": total_loss,
             "policy_loss": policy_loss,
             "value_loss": value_loss,
@@ -444,7 +454,7 @@ def train():
     #     max_to_keep=CHECKPOINT_MAX_TO_KEEP, save_interval_steps=CHECKPOINT_INTERVAL
     # )
     # mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options)
-    
+
     # Initialize AsyncCheckpointer and CheckpointManager
     checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
     options = ocp.CheckpointManagerOptions(
@@ -455,7 +465,7 @@ def train():
 
     # Initialize CheckpointManager with options
     mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options=options)
-    
+
     # Training loop
     with tqdm(range(NUM_UPDATES), desc="Training") as pbar:
         for i in pbar:
@@ -477,7 +487,10 @@ def train():
             # save_args = ocp.SaveArgs(aggregate=True)
             mngr.save(
                 step=i,
-                items={"params": train_state.params, "step": i},  # Ensure this is a dictionary
+                items={
+                    "params": train_state.params,
+                    "step": i,
+                },  # Ensure this is a dictionary
                 # save_kwargs={"save_args": save_args},  # Pass SaveArgs correctly
             )
     wandb.finish()
