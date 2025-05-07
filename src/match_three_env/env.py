@@ -105,7 +105,10 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
 
         state = EnvState(grid=grid, time=state.time + 1)
         done = self.is_terminal(state, params)
-        info = {"discount": self.discount(state, params)}
+        info = {
+            "discount": self.discount(state, params),
+            "matches": matches,
+        }
         return (
             lax.stop_gradient(self.get_obs(state)),
             lax.stop_gradient(state),
