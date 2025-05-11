@@ -13,10 +13,10 @@ def conv_action_to_swap(
     assert 0 <= action < rswap_num + bswap_num
 
     if action < rswap_num:
-        return jnp.array([action // (grid_size[1] - 1), action % (grid_size[1] - 1)]), 2
+        return jnp.array([action // (grid_size[1] - 1), action % (grid_size[1] - 1)]), 3
 
     action -= rswap_num
-    return jnp.array([action % (grid_size[0] - 1), action // (grid_size[0] - 1)]), 3
+    return jnp.array([action % (grid_size[0] - 1), action // (grid_size[0] - 1)]), 2
 
 
 # @partial(jax.jit, static_argnums=(0,))
@@ -29,10 +29,10 @@ def conv_action_to_swap_jit(
 
     grid_cell, direction = jax.lax.cond(
         action < rswap_num,
-        lambda: (jnp.array([action // (width - 1), action % (width - 1)]), 2),
+        lambda: (jnp.array([action // (width - 1), action % (width - 1)]), 3),
         lambda: (
             (_action := action - rswap_num),
-            (jnp.array([_action % (height - 1), _action // (height - 1)]), 3),
+            (jnp.array([_action % (height - 1), _action // (height - 1)]), 2),
         )[1],
     )
     return grid_cell, direction
