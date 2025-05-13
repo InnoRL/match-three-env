@@ -18,7 +18,8 @@ def encode_grid(grid):
 # ----------------------
 # Custom Initializers
 # ----------------------
-def rl_init(scale: float = 2.0, mode: str = "fan_in"):
+# TODO: use orthogonal initialization
+def cnn_init(scale: float = 2.0, mode: str = "fan_in"):
     """Kaiming/He initialization optimized for ReLU networks in RL"""
     return variance_scaling(scale, mode, "truncated_normal", dtype=jnp.float32)
 

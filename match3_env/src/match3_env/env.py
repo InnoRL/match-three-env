@@ -6,6 +6,7 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 from jax import lax
+from jax.tree_util import register_pytree_node_class
 
 from match3_env.game_grid import (
     K_MAX,
@@ -14,7 +15,10 @@ from match3_env.game_grid import (
     MatchThreeGameGridParams,
     MatchThreeGameGridStruct,
 )
-from match3_env.utils import conv_action_to_swap_jit
+from match3_env.utils import (
+    conv_action_to_swap_continuous_jit,
+    conv_action_to_swap_jit,
+)
 
 REWARD_MULTIPLIER = 1
 
@@ -129,6 +133,9 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
 
     def get_obs(self, state: EnvState, params=None, key=None) -> chex.Array:
         """Return observation from raw state."""
+        # return EnvObservation(
+        #     grid=state.grid.grid, time=jnp.array([state.time], dtype=jnp.float32)
+        # )
         return state.grid.grid
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
@@ -169,3 +176,59 @@ class MatchThree(environment.Environment[EnvState, EnvParams]):
         log_weights = jnp.log2(indices)  # log2 or ln
         weighted_matches = matches * REWARD_MULTIPLIER * log_weights
         return jnp.sum(weighted_matches)
+
+
+class MatchThreeContinuous(MatchThree):
+    """Custom version of MatchThree with modified step_env behavior."""
+
+    def __init__(self, params: EnvParams = None):
+        super().__init__()
+        if params is None:
+            params = EnvParams()
+        self.n_actions = 3  # vertical coordinate, horizontal coordinate, direction
+
+    @property
+    def name(self) -> str:
+        """Environment name."""
+        return "Match-3-Continuous"
+
+    def action_space(self, params: Optional[EnvParams] = None) -> spaces.Discrete:
+        """Action space of the environment."""
+        return spaces.Box(low=0, high=1, shape=(self.n_actions,))
+
+    def step_env(
+        self,
+        key: chex.PRNGKey,
+        state: EnvState,
+        action: Union[int, float, chex.Array],
+        params: EnvParams,
+    ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
+        # Your custom implementation here
+        # For example, let's modify the reward calculation
+
+        # First copy the original step logic
+        grid_cell, direction = conv_action_to_swap_continuous_jit(
+            params.grid_size, action
+        )
+        grid, matches = MatchThreeGameGridFunctions.apply_swap(
+            key=key,
+            state=state.grid,
+            params=params.grid_params,
+            grid_cell=grid_cell,
+            direction=direction,
+        )
+
+        # Custom reward calculation - example: simple count of matches
+        reward = jnp.sum(matches.matches)  # Instead of the weighted sum
+
+        state = EnvState(grid=grid, time=state.time + 1)
+        done = self.is_terminal(state, params)
+        info = {"discount": self.discount(state, params)}
+
+        return (
+            lax.stop_gradient(self.get_obs(state)),
+            lax.stop_gradient(state),
+            reward,
+            done,
+            info,
+        )

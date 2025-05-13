@@ -16,16 +16,25 @@ class Critic(nn.Module):
             dtype=self.precision_dtype,
             param_dtype=jnp.float32,
             kernel_init=self.rl_init_fn(),
+            bias_init=nn.initializers.zeros_init()
         )(x)
-        x = nn.relu(x)
+        # x = nn.relu(x)
+        # x = nn.tanh(x)
+        # x = nn.LayerNorm()(x)  # Before activation
+        x = nn.leaky_relu(x, negative_slope=0.01)
         x = nn.Dense(
-            128,
+            256,
             dtype=self.precision_dtype,
+            # dtype=jnp.float32,
             param_dtype=jnp.float32,
             kernel_init=self.rl_init_fn(),
+            bias_init=nn.initializers.zeros_init()
         )(x)
-        x = nn.relu(x)
-        x = nn.LayerNorm()(x) # Introduced for stability
+        x = x.astype(jnp.float32)
+        # x = nn.relu(x)
+        # x = nn.tanh(x)
+        # x = nn.LayerNorm()(x)  # Before activation!
+        x = nn.leaky_relu(x, negative_slope=0.01)
         value = nn.Dense(
             1,
             dtype=jnp.float32,

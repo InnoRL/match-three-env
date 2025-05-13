@@ -34,3 +34,24 @@ def conv_action_to_swap_jit(
         )[1],
     )
     return grid_cell, direction
+
+def conv_action_to_swap_continuous_jit(
+    grid_size: Tuple[int, int], action: chex.Array
+) -> Tuple[chex.Array, int]:
+    # action = [height, width, direction]
+    # height and width are in [0, 1]
+    # direction is in [0, 1]. 0 is swap with top (horizontal), 1 is swap with left (vertical).
+    
+    height, width = grid_size
+    action = jnp.clip(action, 0, 1)
+
+    grid_cell = jnp.array([1 + action[0] * (height - 1), 1 + action[1] * (width - 1)], dtype=jnp.int32)
+    direction = jax.lax.cond(
+        action[2] < 0.5,
+        lambda: 0,
+        lambda: 1,
+    )
+    return grid_cell, jnp.int32(direction)
+    
+    
+

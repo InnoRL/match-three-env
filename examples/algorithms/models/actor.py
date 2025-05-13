@@ -15,23 +15,26 @@ class Actor(nn.Module):
         x = nn.Dense(
             256,
             dtype=self.precision_dtype,
+            # dtype=jnp.float32,
             param_dtype=jnp.float32,
             kernel_init=self.rl_init_fn(),
         )(x)
-        x = nn.relu(x)
+        x = nn.tanh(x)
         x = nn.Dense(
             128,
             dtype=self.precision_dtype,
+            # dtype=jnp.float32,
             param_dtype=jnp.float32,
             kernel_init=self.rl_init_fn(),
         )(x)
-        x = nn.relu(x)
-        x = nn.LayerNorm()(x) # Introduced for stability
+        x = nn.tanh(x)
+        # x = nn.LayerNorm()(x) # Introduced for stability
         # logits should not be bfloat16
         logits = nn.Dense(
             self.action_dim,
             # dtype=jnp.float32,
             dtype=self.precision_dtype,  # NOTE: we are forced to use bfloat16 here. float32 will cause an error (I do not know why)
+            # dtype=jnp.float64,
             param_dtype=jnp.float32,
             kernel_init=self.small_init_fn(),
         )(x)
