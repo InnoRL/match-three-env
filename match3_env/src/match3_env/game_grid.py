@@ -63,14 +63,12 @@ class MatchResults:
 # TODO: this can be removed. Separate mask and num_symbols into env parameters
 @struct.dataclass
 class MatchThreeGameGridStruct:
-    grid: chex.Array = jnp.zeros((GRID_SIZE, GRID_SIZE))
-
+    grid: chex.Array = struct.field(default_factory=lambda: jnp.zeros((GRID_SIZE, GRID_SIZE)))
 
 @struct.dataclass
 class MatchThreeGameGridParams:
     num_symbols: int = 4
-    mask: chex.Array = jnp.zeros((GRID_SIZE, GRID_SIZE))
-
+    mask: chex.Array = struct.field(default_factory=lambda: jnp.zeros((GRID_SIZE, GRID_SIZE)))
 
 class MatchThreeGameGridFunctions:
     """A stateless functional class for Match-Three game grid operations."""
