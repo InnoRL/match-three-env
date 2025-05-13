@@ -7,14 +7,14 @@ from flax import struct
 from gymnax.environments import environment, spaces
 from jax import lax
 
-from match_three_env.game_grid import (
+from match3_env.game_grid import (
     K_MAX,
     K_MIN,
     MatchThreeGameGridFunctions,
     MatchThreeGameGridParams,
     MatchThreeGameGridStruct,
 )
-from match_three_env.utils import conv_action_to_swap_jit
+from match3_env.utils import conv_action_to_swap_jit
 
 REWARD_MULTIPLIER = 1
 

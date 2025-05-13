@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import optax
 from jax.nn.initializers import variance_scaling
 
-from match_three_env.game_grid import K_MAX
+from match3_env.game_grid import K_MAX
 
 
 @jax.jit

@@ -19,13 +19,11 @@ def conv_action_to_swap(
     return jnp.array([action % (grid_size[0] - 1), action // (grid_size[0] - 1)]), 2
 
 
-# @partial(jax.jit, static_argnums=(0,))
 def conv_action_to_swap_jit(
     grid_size: Tuple[int, int], action: int
 ) -> Tuple[chex.Array, int]:
     height, width = grid_size
     rswap_num = height * (width - 1)
-    # bswap_num = (height - 1) * width
 
     grid_cell, direction = jax.lax.cond(
         action < rswap_num,

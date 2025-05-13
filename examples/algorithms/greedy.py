@@ -4,8 +4,8 @@ import pickle
 import jax
 import jax.numpy as jnp
 
-from match_three_env.env import EnvParams, EnvState, MatchThree
-from match_three_env.game_grid import MatchThreeGameGridStruct
+from match3_env.env import EnvParams, EnvState, MatchThree
+from match3_env.game_grid import MatchThreeGameGridStruct
 
 
 def evaluate_greedy_agent(

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "match_three_env"
+name = "match3_env"
 version = "0.0.1"
 dependencies = [
     "jax>=0.5.2",

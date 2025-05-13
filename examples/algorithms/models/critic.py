@@ -1,7 +1,6 @@
 from typing import Callable
-
-import jax.numpy as jnp
 from flax import linen as nn
+import jax.numpy as jnp
 
 
 class Critic(nn.Module):
@@ -26,6 +25,7 @@ class Critic(nn.Module):
             kernel_init=self.rl_init_fn(),
         )(x)
         x = nn.relu(x)
+        x = nn.LayerNorm()(x) # Introduced for stability
         value = nn.Dense(
             1,
             dtype=jnp.float32,

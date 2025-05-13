@@ -4,7 +4,7 @@ import pickle
 import jax
 import jax.numpy as jnp
 
-from match_three_env.env import EnvParams, MatchThree
+from match3_env.env import EnvParams, MatchThree
 
 
 def evaluate_random_agent(

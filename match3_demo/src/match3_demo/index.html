@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Match-3 Game with Four Boards</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        #grids-container {
+            display: grid;
+            grid-template-rows: auto auto;
+            grid-template-columns: repeat(3, 300px);
+            gap: 30px;
+            width: 100%;
+            max-width: 1000px;
+            justify-content: center;
+        }
+        .game-container:nth-child(1) {
+            grid-row: 1;
+            grid-column: 1 / 4;
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        .game-container:nth-child(2) {
+            grid-row: 2;
+            grid-column: 1;
+        }
+        .game-container:nth-child(3) {
+            grid-row: 2;
+            grid-column: 2;
+        }
+        .game-container:nth-child(4) {
+            grid-row: 2;
+            grid-column: 3;
+        }
+        .game-container {
+            max-width: 300px;
+            width: 100%;
+            aspect-ratio: 1;
+        }
+        .non-interactive-container {
+            opacity: 0.7;
+        }
+        .header {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .board-name {
+            font-size: 18px;
+            font-weight: bold;
+            text-align: left;
+        }
+        .score, .moves {
+            font-size: 16px;
+            text-align: center;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+            gap: 1px;
+            width: 100%;
+            height: 100%;
+            background-color: #ccc;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .tile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: calc(300px / 12);
+            user-select: none;
+            transition: transform 0.3s ease;
+            box-sizing: border-box;
+        }
+        .tile.interactive {
+            cursor: pointer;
+        }
+        .tile.non-interactive {
+            pointer-events: none;
+            cursor: default;
+        }
+        .tile-type-0 { background-color: #ff5555; } /* 🟥 */
+        .tile-type-1 { background-color: #5555ff; } /* 🟦 */
+        .tile-type-2 { background-color: #55ff55; } /* 🟩 */
+        .tile-type-3 { background-color: #ffff55; } /* 🟨 */
+        .selected { outline: 2px solid #000; outline-offset: -2px; }
+        .highlight {
+            text-shadow: 0 0 4px #000, 0 0 4px #000, 0 0 4px #000, 0 0 4px #000;
+            box-sizing: border-box;
+        }
+        .dropping { transition: transform 0.5s ease; }
+        .sliding-in {
+            transform: translateY(-100%);
+            transition: transform 0.5s ease;
+        }
+        .spinner {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 50px;
+            height: 50px;
+            border: 4px solid #007bff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            background-color: rgba(255, 255, 255, 0.5);
+            z-index: 10;
+        }
+        @keyframes spin {
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        #reset {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        #reset:hover {
+            background-color: #0056b3;
+        }
+        .error {
+            color: red;
+            margin: 6px 0;
+            font-size: 12px;
+            text-align: center;
+            display: none;
+        }
+        @media (max-width: 1200px) {
+            #grids-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: repeat(4, auto);
+                gap: 30px;
+            }
+            .game-container:nth-child(1),
+            .game-container:nth-child(2),
+            .game-container:nth-child(3),
+            .game-container:nth-child(4) {
+                grid-row: auto;
+                grid-column: 1 / 2;
+                margin: 0 auto;
+            }
+            .game-container {
+                max-width: min(80vw, 80vh);
+            }
+            .tile {
+                font-size: calc(min(80vw, 80vh) / 12);
+            }
+            .board-name {
+                font-size: 22px;
+            }
+            .score, .moves {
+                font-size: 20px;
+            }
+            .spinner {
+                width: calc(min(80vw, 80vh) / 6);
+                height: calc(min(80vw, 80vh) / 6);
+                border-width: 3px;
+            }
+        }
+        @media (max-width: 600px) {
+            .game-container {
+                max-width: min(90vw, 90vh);
+            }
+            .tile {
+                font-size: calc(min(90vw, 90vh) / 15);
+            }
+            .board-name {
+                font-size: 20px;
+            }
+            .score, .moves {
+                font-size: 18px;
+            }
+            .spinner {
+                width: calc(min(90vw, 90vh) / 6);
+                height: calc(min(90vw, 90vh) / 6);
+                border-width: 2px;
+            }
+            .reset {
+                padding: 8px 16px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="grids-container">
+        <div class="game-container" data-grid="0">
+            <div class="header">
+                <div class="board-name">User</div>
+                <div class="score" id="score-0">Score: 0</div>
+                <div class="moves" id="moves-0">Moves Left: 0</div>
+            </div>
+            <div class="board" id="board-0"></div>
+            <div class="error" id="error-0"></div>
+        </div>
+        <div class="game-container non-interactive-container" data-grid="1">
+            <div class="header">
+                <div class="board-name">Random</div>
+                <div class="score" id="score-1">Score: 0</div>
+                <div class="moves" id="moves-1">Moves Left: 0</div>
+            </div>
+            <div class="board" id="board-1">
+                <div class="spinner" id="spinner-1"></div>
+            </div>
+            <div class="error" id="error-1"></div>
+        </div>
+        <div class="game-container non-interactive-container" data-grid="2">
+            <div class="header">
+                <div class="board-name">Greedy</div>
+                <div class="score" id="score-2">Score: 0</div>
+                <div class="moves" id="moves-2">Moves Left: 0</div>
+            </div>
+            <div class="board" id="board-2">
+                <div class="spinner" id="spinner-2"></div>
+            </div>
+            <div class="error" id="error-2"></div>
+        </div>
+        <div class="game-container non-interactive-container" data-grid="3">
+            <div class="header">
+                <div class="board-name">PPO</div>
+                <div class="score" id="score-3">Score: 0</div>
+                <div class="moves" id="moves-3">Moves Left: 0</div>
+            </div>
+            <div class="board" id="board-3">
+                <div class="spinner" id="spinner-3"></div>
+            </div>
+            <div class="error" id="error-3"></div>
+        </div>
+    </div>
+    <button id="reset">Reset</button>
+    <script>
+        const baseUrl = 'http://localhost:8001';
+        const resetButton = document.getElementById('reset');
+        const titles = ['User', 'Random', 'Greedy', 'PPO'];
+        const swapEndpoints = ['swap', 'swap-random', 'swap-greedy', 'swap-ppo'];
+        const grids = [
+            {
+                boardState: [],
+                selectedTile: null,
+                isAnimating: false,
+                boardElement: document.getElementById('board-0'),
+                scoreElement: document.getElementById('score-0'),
+                movesElement: document.getElementById('moves-0'),
+                errorElement: document.getElementById('error-0')
+            },
+            {
+                boardState: [],
+                selectedTile: null,
+                isAnimating: false,
+                boardElement: document.getElementById('board-1'),
+                scoreElement: document.getElementById('score-1'),
+                movesElement: document.getElementById('moves-1'),
+                errorElement: document.getElementById('error-1'),
+                spinnerElement: document.getElementById('spinner-1')
+            },
+            {
+                boardState: [],
+                selectedTile: null,
+                isAnimating: false,
+                boardElement: document.getElementById('board-2'),
+                scoreElement: document.getElementById('score-2'),
+                movesElement: document.getElementById('moves-2'),
+                errorElement: document.getElementById('error-2'),
+                spinnerElement: document.getElementById('spinner-2')
+            },
+            {
+                boardState: [],
+                selectedTile: null,
+                isAnimating: false,
+                boardElement: document.getElementById('board-3'),
+                scoreElement: document.getElementById('score-3'),
+                movesElement: document.getElementById('moves-3'),
+                errorElement: document.getElementById('error-3'),
+                spinnerElement: document.getElementById('spinner-3')
+            }
+        ];
+
+        // Validate board data (tile values 1–4)
+        function isValidBoard(board) {
+            if (!Array.isArray(board)) {
+                console.log('Validation failed: board is not an array');
+                return false;
+            }
+            if (board.length !== 9) {
+                console.log('Validation failed: board length is not 9, got', board.length);
+                return false;
+            }
+            const isValid = board.every((row, i) => {
+                if (!Array.isArray(row)) {
+                    console.log(`Validation failed: row ${i} is not an array`);
+                    return false;
+                }
+                if (row.length !== 9) {
+                    console.log(`Validation failed: row ${i} length is not 9, got`, row.length);
+                    return false;
+                }
+                return row.every((tile, j) => {
+                    const isValidTile = Number.isInteger(tile) && tile >= 1 && tile <= 4;
+                    if (!isValidTile) {
+                        console.log(`Validation failed: tile at [${i},${j}] is invalid, got`, tile);
+                    }
+                    return isValidTile;
+                });
+            });
+            if (!isValid) {
+                console.log('Validation failed: some rows or tiles are invalid');
+            }
+            return isValid;
+        }
+
+        // Validate tile coordinates
+        function isValidTileCoord(tile, name) {
+            if (!Array.isArray(tile) || tile.length !== 2) {
+                console.log(`Validation failed: ${name} is not a [row, col] array, got`, tile);
+                return false;
+            }
+            const [row, col] = tile;
+            if (!Number.isInteger(row) || row < 0 || row > 8) {
+                console.log(`Validation failed: ${name} row is invalid, got`, row);
+                return false;
+            }
+            if (!Number.isInteger(col) || col < 0 || col > 8) {
+                console.log(`Validation failed: ${name} col is invalid, got`, col);
+                return false;
+            }
+            return true;
+        }
+
+        // Fetch and render initial board for a specific grid
+        async function initBoard(gridIndex) {
+            const grid = grids[gridIndex];
+            try {
+                const response = await fetch(`${baseUrl}/${gridIndex}/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                console.log(`Init board response for grid ${gridIndex} (${titles[gridIndex]}):`, data);
+                if (!data.board || !isValidBoard(data.board)) {
+                    throw new Error('Invalid board data received');
+                }
+                grid.boardState = data.board;
+                grid.scoreElement.textContent = `Score: ${Math.round(data.score)}`;
+                grid.movesElement.textContent = `Moves Left: ${data.moves_left}`;
+                renderBoard(gridIndex);
+            } catch (error) {
+                console.error(`Init board error for grid ${gridIndex} (${titles[gridIndex]}):`, error);
+                showError(gridIndex, 'Failed to initialize board: ' + error.message);
+            }
+        }
+
+        // Render the board for a specific grid
+        function renderBoard(gridIndex) {
+            const grid = grids[gridIndex];
+            console.log(`Rendering board for grid ${gridIndex} (${titles[gridIndex]}) with state:`, grid.boardState);
+            grid.boardElement.innerHTML = ''; // Clear existing tiles
+            if (!isValidBoard(grid.boardState)) {
+                showError(gridIndex, 'Invalid board state, cannot render');
+                return;
+            }
+            grid.boardState.forEach((row, i) => {
+                row.forEach((tileType, j) => {
+                    const tile = document.createElement('div');
+                    const adjustedTileType = tileType - 1; // Map 1–4 to 0–3 for classes/emojis
+                    tile.className = `tile tile-type-${adjustedTileType} ${gridIndex === 0 ? 'interactive' : 'non-interactive'}`;
+                    tile.dataset.row = i;
+                    tile.dataset.col = j;
+                    tile.dataset.grid = gridIndex;
+                    tile.draggable = gridIndex === 0;
+                    tile.textContent = ['🟥', '🟦', '🟩', '🟨'][adjustedTileType];
+                    if (gridIndex === 0) {
+                        tile.addEventListener('click', (e) => handleClick(gridIndex, e));
+                        tile.addEventListener('dragstart', (e) => handleDragStart(gridIndex, e));
+                        tile.addEventListener('dragover', (e) => e.preventDefault());
+                        tile.addEventListener('drop', (e) => handleDrop(gridIndex, e));
+                    }
+                    grid.boardElement.appendChild(tile);
+                });
+            });
+            // Re-append spinner for grids 1–3 to ensure it’s after tiles
+            if (gridIndex !== 0 && grid.spinnerElement) {
+                grid.boardElement.appendChild(grid.spinnerElement);
+            }
+            console.log(`Board rendered for grid ${gridIndex} (${titles[gridIndex]}), tile count:`, grid.boardElement.children.length);
+        }
+
+        // Handle tile click for grid 0
+        function handleClick(gridIndex, e) {
+            if (gridIndex !== 0) return; // Only grid 0 is interactive
+            const grid = grids[gridIndex];
+            if (grid.isAnimating) return;
+            const tile = e.target;
+            const row = parseInt(tile.dataset.row);
+            const col = parseInt(tile.dataset.col);
+
+            if (grid.selectedTile) {
+                const prevRow = parseInt(grid.selectedTile.dataset.row);
+                const prevCol = parseInt(grid.selectedTile.dataset.col);
+                grid.selectedTile.classList.remove('selected');
+
+                if (isAdjacent([prevRow, prevCol], [row, col])) {
+                    swapTiles(gridIndex, [prevRow, prevCol], [row, col]);
+                } else {
+                    grid.selectedTile = tile;
+                    tile.classList.add('selected');
+                }
+            } else {
+                grid.selectedTile = tile;
+                tile.classList.add('selected');
+            }
+        }
+
+        // Handle drag start for grid 0
+        function handleDragStart(gridIndex, e) {
+            if (gridIndex !== 0) return; // Only grid 0 is interactive
+            const grid = grids[gridIndex];
+            if (grid.isAnimating) return;
+            e.dataTransfer.setData('text/plain', `${gridIndex},${e.target.dataset.row},${e.target.dataset.col}`);
+        }
+
+        // Handle drop for grid 0
+        function handleDrop(gridIndex, e) {
+            if (gridIndex !== 0) return; // Only grid 0 is interactive
+            e.preventDefault();
+            const grid = grids[gridIndex];
+            if (grid.isAnimating) return;
+            const [sourceGridIndex, row1, col1] = e.dataTransfer.getData('text').split(',').map(Number);
+            if (sourceGridIndex !== gridIndex) return;
+            const row2 = parseInt(e.target.dataset.row);
+            const col2 = parseInt(e.target.dataset.col);
+
+            if (isAdjacent([row1, col1], [row2, col2])) {
+                swapTiles(gridIndex, [row1, col1], [row2, col2]);
+            }
+        }
+
+        // Check if tiles are adjacent
+        function isAdjacent([row1, col1], [row2, col2]) {
+            return Math.abs(row1 - row2) + Math.abs(col1 - col2) === 1;
+        }
+
+        // Perform automated swap for non-User grids
+        async function performAutomatedSwap(gridIndex, data) {
+            const grid = grids[gridIndex];
+            grid.isAnimating = true;
+            try {
+                if (data.error) {
+                    showError(gridIndex, data.error);
+                    return;
+                }
+                if (!isValidBoard(data.board)) {
+                    throw new Error('Invalid board data received');
+                }
+                if (!isValidTileCoord(data.tile1, 'tile1') || !isValidTileCoord(data.tile2, 'tile2')) {
+                    throw new Error('Invalid tile coordinates received');
+                }
+                // Hide spinner before highlighting
+                if (grid.spinnerElement) {
+                    grid.spinnerElement.style.display = 'none';
+                }
+                // Highlight tiles
+                const [row1, col1] = data.tile1;
+                const [row2, col2] = data.tile2;
+                const tileElement1 = grid.boardElement.querySelector(`[data-row="${row1}"][data-col="${col1}"]`);
+                const tileElement2 = grid.boardElement.querySelector(`[data-row="${row2}"][data-col="${col2}"]`);
+                if (tileElement1 && tileElement2) {
+                    tileElement1.classList.add('highlight');
+                    tileElement2.classList.add('highlight');
+                    await new Promise(resolve => setTimeout(resolve, 2500));
+                    tileElement1.classList.remove('highlight');
+                    tileElement2.classList.remove('highlight');
+
+                    // Animate swap
+                    const dx = (col2 - col1) * (100 / 9);
+                    const dy = (row2 - row1) * (100 / 9);
+                    tileElement1.style.transform = `translate(${dx}%, ${dy}%)`;
+                    tileElement2.style.transform = `translate(${-dx}%, ${-dy}%)`;
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    tileElement1.style.transform = '';
+                    tileElement2.style.transform = '';
+                } else {
+                    console.warn(`Tiles not found for grid ${gridIndex} at [${row1},${col1}] or [${row2},${col2}]`);
+                }
+                // Animate drops and update board
+                await animateDrops(gridIndex, data.board);
+                grid.boardState = data.board;
+                grid.scoreElement.textContent = `Score: ${Math.round(data.score)}`;
+                grid.movesElement.textContent = `Moves Left: ${data.moves_left}`;
+                renderBoard(gridIndex);
+            } catch (error) {
+                console.error(`Automated swap error for grid ${gridIndex} (${titles[gridIndex]}):`, error);
+                showError(gridIndex, 'Failed to perform automated swap: ' + error.message);
+                if (grid.spinnerElement) {
+                    grid.spinnerElement.style.display = 'none';
+                }
+            } finally {
+                grid.isAnimating = false;
+            }
+        }
+
+        // Fetch automated swap data
+        async function fetchAutomatedSwap(gridIndex) {
+            const grid = grids[gridIndex];
+            if (grid.spinnerElement) {
+                grid.spinnerElement.style.display = 'block';
+            }
+            try {
+                const endpoint = `${baseUrl}/${gridIndex}/${swapEndpoints[gridIndex]}`;
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                console.log(`Automated swap response for grid ${gridIndex} (${titles[gridIndex]}):`, data);
+                if (!data.error && (!data.tile1 || !data.tile2 || !data.board || data.score == null || data.moves_left == null)) {
+                    throw new Error('Incomplete response data');
+                }
+                return { gridIndex, data };
+            } catch (error) {
+                console.error(`Automated swap fetch error for grid ${gridIndex} (${titles[gridIndex]}):`, error);
+                return { gridIndex, data: { error: 'Cannot connect to server, please try again' } };
+            }
+        }
+
+        // Swap tiles for grid 0 and trigger automated swaps
+        async function swapTiles(gridIndex, tile1, tile2) {
+            if (gridIndex !== 0) return; // Only grid 0 is interactive
+            const grid = grids[gridIndex];
+            grid.isAnimating = true;
+            const [row1, col1] = tile1;
+            const [row2, col2] = tile2;
+
+            // Animate User swap
+            const tileElement1 = grid.boardElement.querySelector(`[data-row="${row1}"][data-col="${col1}"]`);
+            const tileElement2 = grid.boardElement.querySelector(`[data-row="${row2}"][data-col="${col2}"]`);
+            const dx = (col2 - col1) * (100 / 9);
+            const dy = (row2 - row1) * (100 / 9);
+            tileElement1.style.transform = `translate(${dx}%, ${dy}%)`;
+            tileElement2.style.transform = `translate(${-dx}%, ${-dy}%)`;
+
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            try {
+                const response = await fetch(`${baseUrl}/${gridIndex}/swap`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tile1, tile2 })
+                });
+                const data = await response.json();
+
+                if (data.error) {
+                    // Revert User swap
+                    tileElement1.style.transform = '';
+                    tileElement2.style.transform = '';
+                    showError(gridIndex, data.error);
+                } else {
+                    // Update User board
+                    await animateDrops(gridIndex, data.board);
+                    grid.boardState = data.board;
+                    grid.scoreElement.textContent = `Score: ${Math.round(data.score)}`;
+                    grid.movesElement.textContent = `Moves Left: ${data.moves_left}`;
+                    renderBoard(gridIndex);
+
+                    // Perform automated swaps for grids 1–3 in parallel
+                    const swapPromises = [1, 2, 3].map(gridIndex => fetchAutomatedSwap(gridIndex));
+                    const swapResults = await Promise.all(swapPromises);
+
+                    // Process animations sequentially
+                    for (const { gridIndex, data } of swapResults) {
+                        await performAutomatedSwap(gridIndex, data);
+                    }
+                }
+            } catch (error) {
+                tileElement1.style.transform = '';
+                tileElement2.style.transform = '';
+                showError(gridIndex, 'Cannot connect to server, please try again');
+            } finally {
+                grid.isAnimating = false;
+                grid.selectedTile = null;
+            }
+        }
+
+        // Animate tiles dropping for a specific grid
+        async function animateDrops(gridIndex, newBoard) {
+            const grid = grids[gridIndex];
+            const drops = calculateDrops(gridIndex, newBoard);
+            const promises = [];
+
+            drops.forEach(({ row, col, dropAmount }) => {
+                const tile = grid.boardElement.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                if (tile && dropAmount > 0) {
+                    tile.classList.add('dropping');
+                    tile.style.transform = `translateY(${dropAmount * (100 / 9)}%)`;
+                    promises.push(new Promise(resolve => {
+                        tile.addEventListener('transitionend', () => {
+                            tile.classList.remove('dropping');
+                            tile.style.transform = '';
+                            resolve();
+                        }, { once: true });
+                    }));
+                }
+            });
+
+            // Animate new tiles sliding in
+            newBoard.forEach((row, i) => {
+                row.forEach((tileType, j) => {
+                    if (!grid.boardElement.querySelector(`[data-row="${i}"][data-col="${j}"]`)) {
+                        const adjustedTileType = tileType - 1; // Map 1–4 to 0–3
+                        const tile = document.createElement('div');
+                        tile.className = `tile tile-type-${adjustedTileType} sliding-in ${gridIndex === 0 ? 'interactive' : 'non-interactive'}`;
+                        tile.dataset.row = i;
+                        tile.dataset.col = j;
+                        tile.dataset.grid = gridIndex;
+                        tile.draggable = gridIndex === 0;
+                        tile.textContent = ['🟥', '🟦', '🟩', '🟨'][adjustedTileType];
+                        grid.boardElement.appendChild(tile);
+                        setTimeout(() => {
+                            tile.style.transform = 'translateY(0)';
+                            promises.push(new Promise(resolve => {
+                                tile.addEventListener('transitionend', () => {
+                                    tile.classList.remove('sliding-in');
+                                    resolve();
+                                }, { once: true });
+                            }));
+                        }, 0);
+                    }
+                });
+            });
+
+            await Promise.all(promises);
+        }
+
+        // Calculate drop amounts for each tile in a specific grid
+        function calculateDrops(gridIndex, newBoard) {
+            const grid = grids[gridIndex];
+            const drops = [];
+            for (let col = 0; col < 9; col++) {
+                let matchCount = 0;
+                for (let row = 8; row >= 0; row--) {
+                    const tile = grid.boardElement.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+                    if (!tile) {
+                        matchCount++;
+                    } else {
+                        if (matchCount > 0) {
+                            drops.push({ row, col, dropAmount: matchCount });
+                        }
+                    }
+                }
+            }
+            return drops;
+        }
+
+        // Show error message for a specific grid
+        function showError(gridIndex, message) {
+            const grid = grids[gridIndex];
+            grid.errorElement.textContent = message;
+            grid.errorElement.style.display = 'block';
+            setTimeout(() => {
+                grid.errorElement.style.display = 'none';
+            }, 3000);
+        }
+
+        // Handle reset for all grids
+        async function handleResetAll() {
+            if (grids.some(grid => grid.isAnimating)) return;
+            try {
+                for (let i = 0; i < grids.length; i++) {
+                    await initBoard(i);
+                }
+            } catch (error) {
+                console.error('Reset all error:', error);
+                grids.forEach((grid, index) => {
+                    showError(index, 'Failed to reset boards: ' + error.message);
+                });
+            }
+        }
+
+        // Initialize all grids
+        function initAllGrids() {
+            resetButton.addEventListener('click', handleResetAll);
+            grids.forEach((_, index) => {
+                initBoard(index);
+            });
+        }
+
+        // Start the game
+        initAllGrids();
+    </script>
+</body>
+</html>

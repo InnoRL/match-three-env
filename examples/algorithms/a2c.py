@@ -17,8 +17,8 @@ from utils import (
     small_init,
 )
 
-from match_three_env.env import EnvParams, MatchThree
-from match_three_env.game_grid import GRID_SIZE
+from match3_env.env import EnvParams, MatchThree
+from match3_env.game_grid import GRID_SIZE
 
 NUM_ENVS = 3
 GAMMA = 0.99
