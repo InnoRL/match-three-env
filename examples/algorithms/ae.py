@@ -1,5 +1,6 @@
 import os
 from functools import partial
+import shutil
 
 import chex
 import flax.linen as nn
@@ -69,7 +70,7 @@ else:
 
 class AutoEncoder(nn.Module):
     precision_dtype: jnp.dtype = precision_dtype
-    latent_dim: int = 2048
+    latent_dim: int = 1024
     k_symbols: int = 4
 
     def setup(self):
@@ -280,6 +281,14 @@ def train():
     # Setup checkpointing
     ckpt_dir = os.path.abspath(CHECKPOINT_DIR)
     os.makedirs(ckpt_dir, exist_ok=True)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    if os.path.exists(ckpt_dir):
+        try:
+            shutil.rmtree(ckpt_dir)
+            print(f"Cleared existing checkpoint directory: {ckpt_dir}")
+        except Exception as e:
+            print(f"Error clearing directory {ckpt_dir}: {e}")
+            raise
     
     # Initialize AsyncCheckpointer and CheckpointManager
     checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
@@ -288,6 +297,7 @@ def train():
         save_interval_steps=CHECKPOINT_INTERVAL,
         step_prefix="checkpoint_",
     )
+    
 
     # Initialize CheckpointManager with options
     mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options=options)

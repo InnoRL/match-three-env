@@ -53,9 +53,8 @@ class ResidualBlock(nn.Module):
         # print("after x shape: ", x.shape)
         return x + residual
 
-
 class CNN(nn.Module):
-    """CNN for processing 9x9 grids"""
+    """Smaller CNN for processing 9x9 grids"""
 
     precision_dtype: jnp.dtype
     rl_init_fn: Callable
@@ -65,8 +64,10 @@ class CNN(nn.Module):
     def __call__(self, x):
         # Input shape: (9, 9, K_MAX+1)
         # print("CNN input shape: ", x.shape)
+        
+        # First convolution layer with fewer filters
         x = nn.Conv(
-            features=128,
+            features=64,  # Reduced filters from 128 to 64
             kernel_size=(3, 3),
             strides=(1, 1),
             dtype=self.precision_dtype,
@@ -74,44 +75,34 @@ class CNN(nn.Module):
             kernel_init=self.rl_init_fn(),
         )(x)
         x = nn.relu(x)
-        x = nn.Conv(
-            features=256,
-            kernel_size=(3, 3),
-            strides=(1, 1),
-            dtype=self.precision_dtype,
-            param_dtype=jnp.float32,
-            kernel_init=self.rl_init_fn(),
-        )(x)
-        x = nn.relu(x)
-        x = nn.Conv(
-            features=256,
-            kernel_size=(3, 3),
-            strides=(1, 1),
-            dtype=self.precision_dtype,
-            param_dtype=jnp.float32,
-            kernel_init=self.rl_init_fn(),
-        )(x)
-        x = nn.relu(x)
-        x = x.reshape((-1))  # Flatten
-        # Residual blocks
-        # x = ResidualBlock(
-        #     features=128,
-        #     precision_dtype=self.precision_dtype,
-        #     rl_init_fn=self.rl_init_fn,
-        # )(x)
-        # x = ResidualBlock(
-        #     features=256,
-        #     precision_dtype=self.precision_dtype,
-        #     rl_init_fn=self.rl_init_fn,
-        # )(x)
-        # x = ResidualBlock(
-        #     features=256,
-        #     precision_dtype=self.precision_dtype,
-        #     rl_init_fn=self.rl_init_fn,
-        # )(x)
-        # # Global average pooling (replaces flatten)
-        # x = jnp.mean(x, axis=(0, 1))  # (9,9,C) -> (C,)
 
+        # Second convolution layer with fewer filters
+        x = nn.Conv(
+            features=128,  # Reduced filters from 256 to 128
+            kernel_size=(3, 3),
+            strides=(1, 1),
+            dtype=self.precision_dtype,
+            param_dtype=jnp.float32,
+            kernel_init=self.rl_init_fn(),
+        )(x)
+        x = nn.relu(x)
+
+        # Third convolution layer with fewer filters
+        x = nn.Conv(
+            features=128,  # Reduced filters from 256 to 128
+            kernel_size=(3, 3),
+            strides=(1, 1),
+            dtype=self.precision_dtype,
+            param_dtype=jnp.float32,
+            kernel_init=self.rl_init_fn(),
+        )(x)
+        x = nn.relu(x)
+
+        # # Global Average Pooling (replaces flatten)
+        # x = jnp.mean(x, axis=(1, 2))  # (9, 9, C) -> (C,)
+        x = x.reshape(-1)
+
+        # Dense layer to produce the latent space representation
         x = nn.Dense(
             name="latent_space",
             features=self.latent_dim,
@@ -119,5 +110,76 @@ class CNN(nn.Module):
             param_dtype=jnp.float32,
             kernel_init=self.rl_init_fn(),
         )(x)
+
         print("CNN output shape: ", x.shape)
         return x
+
+
+
+# class CNN(nn.Module):
+#     """CNN for processing 9x9 grids"""
+
+#     precision_dtype: jnp.dtype
+#     rl_init_fn: Callable
+#     latent_dim: int  # Dimension of the latent space (bottleneck)
+
+#     @nn.compact
+#     def __call__(self, x):
+#         # Input shape: (9, 9, K_MAX+1)
+#         # print("CNN input shape: ", x.shape)
+#         x = nn.Conv(
+#             features=128,
+#             kernel_size=(3, 3),
+#             strides=(1, 1),
+#             dtype=self.precision_dtype,
+#             param_dtype=jnp.float32,
+#             kernel_init=self.rl_init_fn(),
+#         )(x)
+#         x = nn.relu(x)
+#         x = nn.Conv(
+#             features=256,
+#             kernel_size=(3, 3),
+#             strides=(1, 1),
+#             dtype=self.precision_dtype,
+#             param_dtype=jnp.float32,
+#             kernel_init=self.rl_init_fn(),
+#         )(x)
+#         x = nn.relu(x)
+#         x = nn.Conv(
+#             features=256,
+#             kernel_size=(3, 3),
+#             strides=(1, 1),
+#             dtype=self.precision_dtype,
+#             param_dtype=jnp.float32,
+#             kernel_init=self.rl_init_fn(),
+#         )(x)
+#         x = nn.relu(x)
+#         x = x.reshape((-1))  # Flatten
+#         # Residual blocks
+#         # x = ResidualBlock(
+#         #     features=128,
+#         #     precision_dtype=self.precision_dtype,
+#         #     rl_init_fn=self.rl_init_fn,
+#         # )(x)
+#         # x = ResidualBlock(
+#         #     features=256,
+#         #     precision_dtype=self.precision_dtype,
+#         #     rl_init_fn=self.rl_init_fn,
+#         # )(x)
+#         # x = ResidualBlock(
+#         #     features=256,
+#         #     precision_dtype=self.precision_dtype,
+#         #     rl_init_fn=self.rl_init_fn,
+#         # )(x)
+#         # # Global average pooling (replaces flatten)
+#         # x = jnp.mean(x, axis=(0, 1))  # (9,9,C) -> (C,)
+
+#         x = nn.Dense(
+#             name="latent_space",
+#             features=self.latent_dim,
+#             dtype=self.precision_dtype,
+#             param_dtype=jnp.float32,
+#             kernel_init=self.rl_init_fn(),
+#         )(x)
+#         print("CNN output shape: ", x.shape)
+#         return x

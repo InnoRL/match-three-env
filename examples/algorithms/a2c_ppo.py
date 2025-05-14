@@ -1,5 +1,6 @@
 import os
 from functools import partial
+import shutil
 
 import chex
 import flax.linen as nn
@@ -19,13 +20,14 @@ from utils import (
 )
 from flax.core import freeze, unfreeze
 
+
 from match3_env.env import EnvParams, MatchThree
 from match3_env.game_grid import GRID_SIZE
 
-NUM_ENVS = 15
+NUM_ENVS = 20
 GAMMA = 0.95  # 0.99
 LAMBDA = 0.95  # 0.98
-LEARNING_RATE_ACTOR = 1e-4  # Default is 0.0001
+LEARNING_RATE_ACTOR = 1e-3  # Default is 0.0001
 LEARNING_RATE_CRITIC = 1e-3  # Default is 0.0001
 LEARNING_RATE_CNN = 3e-4  # Default is 0.0001
 
@@ -149,7 +151,7 @@ class ActorCritic(nn.Module):
         self.cnn = CNN(
             self.precision_dtype,
             rl_init_fn=cnn_init,
-            latent_dim=2048,
+            latent_dim=1024,
         )
         self.step_embedding = nn.Embed(
             num_embeddings=100,
@@ -682,6 +684,13 @@ def train():
     # Setup checkpointing
     ckpt_dir = os.path.abspath(CHECKPOINT_DIR)
     os.makedirs(ckpt_dir, exist_ok=True)
+    if os.path.exists(ckpt_dir):
+        try:
+            shutil.rmtree(ckpt_dir)
+            print(f"Cleared existing checkpoint directory: {ckpt_dir}")
+        except Exception as e:
+            print(f"Error clearing directory {ckpt_dir}: {e}")
+            raise
     # checkpointer = ocp.PyTreeCheckpointer()
     # options = ocp.CheckpointManagerOptions(
     #     max_to_keep=CHECKPOINT_MAX_TO_KEEP, save_interval_steps=CHECKPOINT_INTERVAL
@@ -689,15 +698,17 @@ def train():
     # mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options)
 
     # Initialize AsyncCheckpointer and CheckpointManager
-    checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
+    # checkpointer = ocp.AsyncCheckpointer(ocp.PyTreeCheckpointHandler())
     options = ocp.CheckpointManagerOptions(
         max_to_keep=CHECKPOINT_MAX_TO_KEEP,
         save_interval_steps=CHECKPOINT_INTERVAL,
         step_prefix="checkpoint_",
     )
+    orbax_checkpointer = ocp.PyTreeCheckpointer()
+    # orbax_checkpointer.save('/tmp/flax_ckpt/orbax/single_save', ckpt, save_args=save_args)
 
-    # Initialize CheckpointManager with options
-    mngr = ocp.CheckpointManager(ckpt_dir, checkpointer, options=options)
+    # # Initialize CheckpointManager with options
+    mngr = ocp.CheckpointManager(ckpt_dir, orbax_checkpointer, options=options)
 
     # Training loop
     with tqdm(range(NUM_UPDATES), desc="Training") as pbar:
@@ -714,16 +725,19 @@ def train():
                         "entropy": f"{metrics['stats/entropy']:.3f}",
                     }
                 )
+            if i % 5 == 0:
                 train_state = train_state.replace(params_behavior=train_state.params)
             wandb.log(metrics)
 
             # NOTE: we dont need the condition here since orbax will deal with intervals
             # save_args = ocp.SaveArgs(aggregate=True)
+            # Initialize CheckpointManager with options
+
             mngr.save(
                 step=i,
                 items={
-                    "params": train_state.params,
-                    "step": i,
+                    "params": train_state.params["params"],
+                    # "step": i,
                 },  # Ensure this is a dictionary
                 # save_kwargs={"save_args": save_args},  # Pass SaveArgs correctly
             )
