@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from src.match3_demo.ppo_model import PPOModel
 from match3_env.env import EnvParams, EnvState, MatchThree
 from match3_env.game_grid import MatchThreeGameGridStruct
 
@@ -11,6 +12,8 @@ class GameService:
 
         self.step_env_jit = jax.jit(self.env.step_env)
         self.reset_env_jit = jax.jit(self.env.reset)
+        
+        self.ppo_model = PPOModel()
 
         self.reset()
 
@@ -125,6 +128,21 @@ class GameService:
         }
 
     def swap_ppo(self):
+        self.rng, action_key = jax.random.split(self.rng)
+        action = self.ppo_model.get_action(observation=self.observation, timestep=self.state.time)
+        self.observation, self.state, reward, _, info = self.step_env_jit(
+            action_key, self.state, action, self.env_params
+        )
+        self.episode_return += float(reward)
+
+        tile1, tile2 = self._action_to_tiles(action)
+        return {
+            "tile1": tile1,
+            "tile2": tile2,
+            "board": self.state.grid.grid.tolist(),
+            "score": self.episode_return,
+            "moves_left": int(self.env_params.max_steps_in_episode - self.state.time),
+        }
         return self.swap_random()
 
 

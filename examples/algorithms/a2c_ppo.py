@@ -10,9 +10,9 @@ import optax
 import orbax.checkpoint as ocp
 import wandb
 # from ae import AutoEncoder
-from models import CNN, Actor, Critic
+from examples.algorithms.models import CNN, Actor, Critic
 from tqdm import tqdm
-from utils import (
+from examples.algorithms.utils import (
     cosine_annealing_with_warmup,
     encode_grid,
     cnn_init,
